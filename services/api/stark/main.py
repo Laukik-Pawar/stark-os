@@ -34,7 +34,7 @@ from .core.db import (
     to_dict,
 )
 from .core.events import EventBus
-from .core.model_router import ModelRouter
+from .core.model_router import ModelRouter, NoModelAvailable
 from .core.observability import configure_logging, log
 from .core.permissions import Mode
 from .core.runtime import TERMINAL, Kernel
@@ -447,8 +447,11 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
             route = k.router.select(cfg)
             data["model_in_use"] = {"provider": route.provider.name, "model": route.model, "reason": route.reason,
                                     "fallbacks": route.candidates[1:]}
-        except Exception as exc:
-            data["model_in_use"] = {"provider": None, "model": None, "reason": str(exc)}
+        except NoModelAvailable as exc:  # our own, user-facing setup message
+            data["model_in_use"] = {"provider": None, "model": None, "reason": exc.args[0] if exc.args else "no model"}
+        except Exception:  # never send internal error details to the client
+            log.exception("model routing failed")
+            data["model_in_use"] = {"provider": None, "model": None, "reason": "model routing failed (see API log)"}
         data["live"] = k.agent_status.get(cfg.id)
         data["metrics"] = metrics.get(cfg.id, {"tasks": {}, "tokens": 0, "cost_usd": 0.0, "success_rate": None})
         data["tool_details"] = [t.info() for t in k.tools.for_agent(cfg)]
