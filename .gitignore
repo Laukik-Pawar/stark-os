@@ -35,3 +35,4 @@ apps/web/e2e/screenshots/
 *.log
 build/
 dist/
+docs/demo-raw/

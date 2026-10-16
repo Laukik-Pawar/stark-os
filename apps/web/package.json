@@ -9,7 +9,8 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "screenshots": "next build && playwright test -c playwright.docs.config.ts"
+    "screenshots": "next build && playwright test -c playwright.docs.config.ts",
+    "demo-gif": "next build && STARK_DEMO=1 playwright test -c playwright.docs.config.ts && node e2e/make-gif.mjs"
   },
   "dependencies": {
     "lucide-react": "1.56.0",

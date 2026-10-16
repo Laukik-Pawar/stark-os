@@ -13,7 +13,7 @@ const py = process.env.STARK_PYTHON || path.resolve(__dirname, "../../services/a
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: "docs.screens.ts",
+  testMatch: process.env.STARK_DEMO ? "demo.screens.ts" : "docs.screens.ts",
   workers: 1,
   use: {
     baseURL: "http://127.0.0.1:3200",

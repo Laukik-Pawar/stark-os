@@ -10,7 +10,15 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 
 > **Fan-made, not affiliated with Marvel or Disney.** Character names are used descriptively. Personas, prompts, visuals and voices are original; no copyrighted dialogue, artwork, likeness or actor voices are used. See [Disclaimer](#disclaimer).
 
-![Start page](docs/screenshots/start.png)
+![STARK OS demo: ask E.D.I.T.H. for a post, review it, publish it](docs/demo.gif)
+
+## Why STARK OS?
+
+- **Free.** No subscription and no paid AI: it runs on free OpenRouter models, with automatic failover when one is busy.
+- **You stay in charge.** Agents draft, check and schedule; nothing is posted until you approve that exact text.
+- **Private.** Everything runs on your computer. Your social logins never leave it.
+- **A real team, not one chatbot.** Seven agents with separate jobs check each other's work, including a red-team agent whose only job is to find how a post could backfire.
+- **Hackable.** Each agent is a small TOML file plus a prompt. Add an agent, a tool or a platform in an afternoon.
 
 ## The team
 
@@ -85,9 +93,10 @@ Ports 3000 or 8000 already used by another project? Add `STARK_WEB_PORT=3737` an
 
 | | |
 |---|---|
-| ![Content: your posts and accounts](docs/screenshots/content.png) | ![Approval before publishing](docs/screenshots/approval.png) |
+| ![Start page: how it works and setup checklist](docs/screenshots/start.png) | ![Content: your posts and accounts](docs/screenshots/content.png) |
+| ![Approval before publishing](docs/screenshots/approval.png) | ![Free models, live status](docs/screenshots/models.png) |
 | ![The seven agents, each with its own brain](docs/screenshots/agents.png) | ![Team review with visible collaboration](docs/screenshots/collaboration.png) |
-| ![Command: talk to any agent](docs/screenshots/command.png) | ![Free models, live status](docs/screenshots/models.png) |
+| ![Command: talk to any agent](docs/screenshots/command.png) | |
 
 ## Tests
 
@@ -115,7 +124,7 @@ docs/                   ARCHITECTURE, DECISIONS, IMPLEMENTATION_STATUS, TASKS
 
 ## Contributing
 
-Issues, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and [ACCESSIBILITY.md](ACCESSIBILITY.md). Questions go to [Discussions](https://github.com/Shahrukhalid/stark-os/discussions).
+Issues, ideas and pull requests are welcome. New here? Pick a [good first issue](https://github.com/Shahrukhalid/stark-os/labels/good%20first%20issue). See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and [ACCESSIBILITY.md](ACCESSIBILITY.md). Questions go to [Discussions](https://github.com/Shahrukhalid/stark-os/discussions).
 
 ## Disclaimer
 
