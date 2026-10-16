@@ -84,9 +84,9 @@ export function SettingsView({ onSignOut }: { onSignOut: () => void }) {
         <div className="mt-3 space-y-1.5">
           {grants.length === 0 && <p className="text-xs text-[var(--color-mute)]">No standing grants. Only reversible “write” tools can be granted; grants expire.</p>}
           {grants.map((x) => (
-            <div key={x.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-xs">
+            <div key={x.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-xs">
               <span className="font-medium">{x.agent_id}</span>
-              <span className="font-mono">{x.tool_id}</span>
+              <span className="break-anywhere min-w-0 font-mono">{x.tool_id}</span>
               <span className="chip">{x.scope || "any path"}</span>
               <span className="text-[var(--color-mute)]">until {x.expires_at ? new Date(x.expires_at).toLocaleString() : "∞"}</span>
               <button className="btn btn-danger ml-auto !px-2 !py-1" onClick={() => client.del(`/api/grants/${x.id}`).then(loadGrants).catch((e) => notify("error", e.message))} aria-label="Revoke grant">
@@ -101,7 +101,7 @@ export function SettingsView({ onSignOut }: { onSignOut: () => void }) {
         <p className="mb-2 text-xs text-[var(--color-mute)]">
           All agents run on free OpenRouter models. Each agent has a tier (deep / balanced / fast); the Models panel shows which free models serve each tier and lets you ping them. Pin a model with <code className="font-mono">OPENROUTER_MODEL</code> in <code className="font-mono">.env</code> or <code className="font-mono">[model] model</code> in <code className="font-mono">agents/&lt;id&gt;/agent.toml</code>.
         </p>
-        <table className="w-full text-left text-xs">
+        <table className="w-full table-fixed text-left text-xs">
           <tbody>
             {agents.map((a) => (
               <tr key={a.id} className="border-t border-[var(--color-line)]">
@@ -109,8 +109,8 @@ export function SettingsView({ onSignOut }: { onSignOut: () => void }) {
                   {a.name}
                 </td>
                 <td>{a.model.tier}</td>
-                <td className="font-mono">{a.model_in_use.model || "—"}</td>
-                <td className="text-[var(--color-mute)]">{a.model_in_use.reason}</td>
+                <td className="break-anywhere font-mono">{a.model_in_use.model || "—"}</td>
+                <td className="break-anywhere text-[var(--color-mute)]">{a.model_in_use.reason}</td>
               </tr>
             ))}
           </tbody>
@@ -126,10 +126,10 @@ export function SettingsView({ onSignOut }: { onSignOut: () => void }) {
             {agents.map((a) => {
               const v = pickVoice(voices, a.voice);
               return (
-                <div key={a.id} className="flex items-center gap-2">
+                <div key={a.id} className="flex flex-wrap items-center gap-x-2">
                   <AgentGlyph icon={a.icon} color={a.color} size={16} />
                   <span className="w-24">{a.name}</span>
-                  <span className="font-mono">{v ? `${v.name} (${v.lang})` : "default voice"}</span>
+                  <span className="break-anywhere min-w-0 font-mono">{v ? `${v.name} (${v.lang})` : "default voice"}</span>
                   <span className="ml-auto text-[var(--color-mute)]">pitch {a.voice.pitch} · rate {a.voice.rate}</span>
                 </div>
               );
