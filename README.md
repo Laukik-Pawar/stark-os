@@ -10,7 +10,7 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 
 > **Fan-made, not affiliated with Marvel or Disney.** Character names are used descriptively. Personas, prompts, visuals and voices are original; no copyrighted dialogue, artwork, likeness or actor voices are used. See [Disclaimer](#disclaimer).
 
-![Agents](docs/screenshots/agents.png)
+![Start page](docs/screenshots/start.png)
 
 ## The team
 
@@ -83,9 +83,11 @@ Ports 3000 or 8000 already used by another project? Add `STARK_WEB_PORT=3737` an
 | `DUM-E, publish cnt_…` | Pre-flight checks → approval card with the exact text → real post (Bluesky/Mastodon) or SIMULATED |
 | `JARVIS, have the team review the giveaway campaign` | Parallel reviews, Ultron's challenge, combined report |
 
-![Start](docs/screenshots/start.png)
-![Content](docs/screenshots/content.png)
-![Collaboration](docs/screenshots/collaboration.png)
+| | |
+|---|---|
+| ![Content: your posts and accounts](docs/screenshots/content.png) | ![Approval before publishing](docs/screenshots/approval.png) |
+| ![The seven agents, each with its own brain](docs/screenshots/agents.png) | ![Team review with visible collaboration](docs/screenshots/collaboration.png) |
+| ![Command: talk to any agent](docs/screenshots/command.png) | ![Free models, live status](docs/screenshots/models.png) |
 
 ## Tests
 

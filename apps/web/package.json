@@ -8,7 +8,8 @@
     "start": "next start -H 127.0.0.1 -p 3000",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "screenshots": "next build && playwright test -c playwright.docs.config.ts"
   },
   "dependencies": {
     "lucide-react": "1.56.0",

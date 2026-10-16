@@ -1,0 +1,92 @@
+/**
+ * Generates the README screenshots with realistic sample content on a fresh database.
+ * Run: npm run screenshots   (not part of the regular test suite)
+ */
+import { expect, test, type Page } from "@playwright/test";
+
+const TOKEN = "e2e-token-0123456789abcdefghijkl";
+async function shot(page: Page, name: string) {
+  const dismiss = page.getByRole("button", { name: "Dismiss" });
+  while (await dismiss.count()) await dismiss.first().click(); // no toasts in the README images
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `../../docs/screenshots/${name}.png`, fullPage: true });
+}
+
+async function send(page: Page, text: string) {
+  await page.getByLabel("Message").fill(text);
+  await page.getByRole("button", { name: "Send" }).click();
+}
+
+test("README screenshots", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.locator("#stark-api-url").fill("http://127.0.0.1:8200");
+  await page.getByPlaceholder("STARK_API_TOKEN from your .env").fill(TOKEN);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByText("Your AI social media team")).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "Command", exact: true }).click();
+  for (const p of ["LinkedIn", "Mastodon", "Bluesky"]) {
+    await send(page, `EDITH, write a ${p} post about our launch week`);
+    await expect(page.getByText(new RegExp(`Here's a ${p} draft`))).toBeVisible({ timeout: 20_000 });
+  }
+  await send(page, "Friday, check our mentions and draft replies");
+  await expect(page.getByText(/SIMULATED sample inbox/).last()).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  await shot(page, "command");
+
+  // Content: schedule one for tomorrow with auto-publish, simulate one, keep one as a draft
+  await page.getByRole("button", { name: "Content", exact: true }).click();
+  const cards = page.getByTestId("content-item");
+  await expect(cards).toHaveCount(3);
+  const linkedin = cards.filter({ hasText: "Three things we learned" });
+  await linkedin.getByRole("button", { name: "Schedule" }).click();
+  const t = new Date(Date.now() + 24 * 3600_000);
+  t.setHours(9, 30, 0, 0);
+  await linkedin.getByLabel("Publish date and time").fill(new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+  await linkedin.getByRole("button", { name: "Save schedule" }).click();
+  await expect(linkedin.getByText("auto-publish approved")).toBeVisible();
+  const masto = cards.filter({ hasText: "Behind the scenes" });
+  await masto.getByRole("button", { name: "Publish (simulation)" }).click();
+  await masto.getByRole("button", { name: "Run simulation" }).click();
+  await expect(masto.getByText("SIMULATED", { exact: true })).toBeVisible();
+  const bsky = cards.filter({ hasText: "New video is up" });
+  await bsky.getByRole("button", { name: "Publish (simulation)" }).click(); // show the confirm step
+  await page.waitForTimeout(400);
+  await shot(page, "content");
+  await bsky.getByRole("button", { name: "Cancel" }).click();
+
+  // Approval card: D.U.M.-E. asks before publishing from chat
+  const id = (await bsky.innerText()).match(/cnt_[0-9a-f]{16}/)![0];
+  await page.getByRole("button", { name: "Command", exact: true }).click();
+  await send(page, `DUM-E, publish ${id}`);
+  await expect(page.getByRole("button", { name: "Approve once" })).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(400);
+  await shot(page, "approval");
+  await page.getByRole("button", { name: "Approve once" }).click();
+  await expect(page.getByText(/whirr\s+SIMULATED publish/).last()).toBeVisible({ timeout: 20_000 });
+
+  // Team review: parallel reviews + Ultron's challenge, shown in Tasks
+  await send(page, "JARVIS, ask the whole team to review our launch week plan");
+  await expect(page.getByText(/Team review complete/).last()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "trace" }).last().click();
+  await expect(page.getByText(/Agent messages \(\d+\)/)).toBeVisible();
+  await page.waitForTimeout(500);
+  await shot(page, "collaboration");
+
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByText(/Setup · \d\/4/)).toBeVisible();
+  await page.waitForTimeout(500);
+  await shot(page, "start");
+
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "ULTRON", exact: true })).toBeVisible();
+  await page.waitForTimeout(400);
+  await shot(page, "agents");
+
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+  await expect(page.getByText(/free requests left today/)).toBeVisible();
+  await page.waitForTimeout(400);
+  await shot(page, "models");
+});

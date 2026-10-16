@@ -51,6 +51,25 @@ def respond(body: dict) -> dict:
         else:
             d = last["data"]
             msg = {"role": "assistant", "content": f"Drafted {d['id']} for Bluesky. Check: {d['check']['verdict'].upper()}."}
+    elif has_tools and "write a " in low and " post about" in low and "social__draft" in tool_names:  # docs screenshots
+        platform = next((p for p in ("linkedin", "mastodon", "bluesky") if p in low), "bluesky")
+        sample = {
+            "bluesky": "New video is up: how we plan a whole week of posts in 20 minutes, with an AI team that "
+                       "asks before anything goes live. https://example.com/video #creators",
+            "mastodon": "Behind the scenes: every post our AI team drafts gets a rule check (length, links, #ad, "
+                        "alt text) before we approve it. What would you add to the list? #opensource",
+            "linkedin": "Three things we learned running social media with seven AI agents:\n\n1. Approval beats "
+                        "automation: nothing goes live without a human click.\n2. A red-team agent catches "
+                        "tone-deaf posts early.\n3. Free models are good enough for drafts.\n\nFull write-up: "
+                        "https://example.com/blog",
+        }[platform]
+        if n == 0:
+            msg = call("social__draft", {"platform": platform, "text": sample, "campaign": "launch week"}, n)
+        else:
+            d = last["data"]
+            name = {"linkedin": "LinkedIn", "mastodon": "Mastodon", "bluesky": "Bluesky"}[platform]
+            msg = {"role": "assistant", "content": f"Here's a {name} draft ({d['id']}). "
+                                                   f"Check: **{d['check']['verdict'].upper()}**. Want a punchier hook?"}
     elif has_tools and "publish cnt_" in low and "social__publish" in tool_names:
         item = next(w for w in user.split() if w.startswith("cnt_"))
         if n == 0:
@@ -78,12 +97,30 @@ def respond(body: dict) -> dict:
             names = ", ".join(r["agent"] for r in reviews if r["status"] == "completed")
             msg = {"role": "assistant", "content": f"Team review complete. Contributions from: {names}. "
                                                    f"Ultron challenge: {last['data']['challenge']['status']}."}
+    elif user.startswith(("Team review request", "Challenge these team review results")):
+        reviews = {
+            "F.R.I.D.A.Y.": "**High:** expect questions about pricing on launch day: prepare two short replies.\n**Low:** post the recap in the evening, when replies peak.",
+            "E.D.I.T.H.": "**High:** the Bluesky hook is strong; add a poll (\"Which feature first?\") to day 2.\n**Medium:** LinkedIn post needs one concrete number.",
+            "JOCASTA": "**High:** \"20 minutes\" claim: keep it only if you can show the timing.\n**Medium:** two competitors launched this week; avoid their hashtag.",
+            "D.U.M.-E.": "*whirr* **Medium:** two posts scheduled 10 minutes apart on Mastodon; spread them out.\nChecks: all PASS.",
+            "U": "Storyboard ready for a 20-second clip. **Medium:** add alt text to the cover image.",
+            "ULTRON": "Weakest point: \"nothing goes live without a human\" invites \"so why use AI?\". **Verdict: REVISE** the LinkedIn opener.",
+        }
+        msg = {"role": "assistant", "content": reviews.get(who, f"{who}: looks good.")}
     else:
         msg = {"role": "assistant", "content": f"{who} acknowledges: {user[:120]}"}
 
     return {"id": "mock", "object": "chat.completion", "model": body.get("model", "mock"),
             "choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls" if msg.get("tool_calls") else "stop"}],
             "usage": {"prompt_tokens": 120, "completion_tokens": 30}}
+
+
+FREE_MODEL_IDS = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3.5-super-vl:free", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "dots-studio/dots-3-note-preview:free",
+    "cohere/north-mini-code:free",
+]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -103,10 +140,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"data": {"label": "e2e", "is_free_tier": True,
                                       "free_model_daily_requests": {"limit": 50, "remaining": 49, "used": 1}}})
             return
-        self._send(200, {"data": [{"id": "mock/free-tools:free", "name": "Mock (test only)", "context_length": 8192,
+        # the scripted server answers for every id, so the agents' own first-choice models show up as in real use
+        ids = ["mock/free-tools:free", *FREE_MODEL_IDS]
+        self._send(200, {"data": [{"id": m, "name": "Mock (test only)" if m.startswith("mock/") else m, "context_length": 8192,
                                    "pricing": {"prompt": "0", "completion": "0"},
                                    "supported_parameters": ["tools"],
-                                   "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}}]})
+                                   "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}}
+                                  for m in ids]})
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
