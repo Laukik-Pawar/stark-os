@@ -163,3 +163,14 @@ def test_upgrade_adds_new_columns_to_an_existing_database(tmp_path):
     assert {"auto_publish", "approved_fp", "approved_at", "paused"} <= cols
     with db.session() as s:
         assert s.get(ContentItem, "cnt_1").auto_publish in (False, 0)
+
+
+def test_publish_refuses_when_the_page_expected_a_simulation_but_the_account_is_live(client):
+    k, _ = _wire(client, {})
+    item_id = _draft(k)
+    fp = client.get("/api/social/queue").json()["items"][0]["fingerprint"]
+    # The page thinks the account is connected, but it is not: refuse rather than mislabel.
+    r = client.post(f"/api/social/items/{item_id}/publish", json={"fingerprint": fp, "live": True})
+    assert r.status_code == 409 and "connection changed" in r.json()["detail"]
+    r = client.post(f"/api/social/items/{item_id}/publish", json={"fingerprint": fp, "live": False}).json()
+    assert r["ok"] and r["simulated"]

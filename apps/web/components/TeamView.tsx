@@ -1,7 +1,7 @@
 "use client";
 
 import { MessageSquare, Volume2, X } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStark } from "@/lib/store";
 import type { Agent } from "@/lib/types";
 import { speak, ttsSupported } from "@/lib/voice";
@@ -103,9 +103,28 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function AgentDetail({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    panel.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus(); // give focus back to the button that opened the drawer
+    };
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60" onClick={onClose}>
-      <aside className="panel h-full w-full max-w-2xl overflow-y-auto !rounded-none p-6" onClick={(e) => e.stopPropagation()}>
+      <aside
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${agent.name} details`}
+        tabIndex={-1}
+        className="panel h-full w-full max-w-2xl overflow-y-auto !rounded-none p-6 outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mb-4 flex items-center gap-3">
           <AgentGlyph icon={agent.icon} color={agent.color} size={34} />
           <div className="flex-1">
@@ -193,6 +212,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 export function TeamView({ talkTo, openTask }: { talkTo: (id: string) => void; openTask: (id: string) => void }) {
   const { agents } = useStark();
   const [open, setOpen] = useState<string | null>(null);
+  const closeAgent = useCallback(() => setOpen(null), []);
   const openAgent = agents.find((a) => a.id === open);
   return (
     <>
@@ -201,7 +221,7 @@ export function TeamView({ talkTo, openTask }: { talkTo: (id: string) => void; o
           <AgentCard key={a.id} agent={a} onOpen={() => setOpen(a.id)} talkTo={talkTo} openTask={openTask} />
         ))}
       </div>
-      {openAgent && <AgentDetail agent={openAgent} onClose={() => setOpen(null)} />}
+      {openAgent && <AgentDetail agent={openAgent} onClose={closeAgent} />}
     </>
   );
 }

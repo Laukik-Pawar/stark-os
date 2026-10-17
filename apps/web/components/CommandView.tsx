@@ -6,7 +6,7 @@ import { detectWake, parseAddress } from "@/lib/addressing";
 import { useStark } from "@/lib/store";
 import type { Agent, Task, Turn } from "@/lib/types";
 import { Markdown } from "./Markdown";
-import { createRecognizer, speak, stopSpeaking, sttSupported, ttsSupported, type Recognizer } from "@/lib/voice";
+import { createRecognizer, isSpeaking, speak, stopSpeaking, sttSupported, ttsSupported, type Recognizer } from "@/lib/voice";
 import { ApprovalCard } from "./ApprovalCard";
 import { AgentGlyph, StateBadge, STATE_META, TaskStatus } from "./ui";
 
@@ -88,13 +88,16 @@ export function CommandView({ agentId, setAgentId, openTask, prefill = "" }: { a
     setSpeakReplies(readPref("stark.speak", false));
   }, []);
 
+  const turnsReq = useRef(0);
   const loadTurns = useCallback(
     async (conv: string | null) => {
+      const req = ++turnsReq.current; // only the newest request may update the transcript
       if (!conv) return setTurns([]);
       try {
-        setTurns(await client.get<Turn[]>(`/api/conversations/${conv}/turns`));
+        const turns = await client.get<Turn[]>(`/api/conversations/${conv}/turns`);
+        if (req === turnsReq.current) setTurns(turns);
       } catch (e: any) {
-        notify("error", e.message);
+        if (req === turnsReq.current) notify("error", e.message);
       }
     },
     [client, notify],
@@ -199,9 +202,10 @@ export function CommandView({ agentId, setAgentId, openTask, prefill = "" }: { a
     }
     const rec = createRecognizer({
       continuous: true,
-      onPartial: (t) => detectWake(t) && setPartial(t),
+      onPartial: (t) => !isSpeaking() && detectWake(t) && setPartial(t),
       onFinal: (t) => {
         setPartial("");
+        if (isSpeaking()) return; // the microphone heard our own spoken reply, not the user
         if (detectWake(t)) sendRef.current(t); // only utterances that start with an agent name are sent
       },
       onState: (on) => setListeningAgent(on ? "wake" : null),

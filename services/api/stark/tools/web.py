@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import re
 import socket
 from datetime import datetime, timezone
@@ -388,9 +389,15 @@ class BrowserRender(Tool):
         shot_path = None
         try:
             async with async_playwright() as pw:
-                browser = await pw.chromium.launch()
+                browser = await pw.chromium.launch(
+                    executable_path=os.environ.get("STARK_CHROMIUM_PATH") or None,
+                    # WebRTC (UDP) is not visible to request routing; keep it off local networks.
+                    args=["--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--webrtc-ip-handling-policy=disable_non_proxied_udp"],
+                )
                 try:
-                    page = await browser.new_page(user_agent=USER_AGENT)
+                    # Service workers make requests that routing never sees (SSRF bypass): block them.
+                    context = await browser.new_context(user_agent=USER_AGENT, service_workers="block")
+                    page = await context.new_page()
 
                     async def guard(route):
                         url = route.request.url
@@ -412,9 +419,10 @@ class BrowserRender(Tool):
                         except FetchBlocked:
                             await route.abort()
 
-                    await page.route("**/*", guard)
-                    # page.route does not see WebSockets: refuse them all (SSRF via ws://127.0.0.1)
-                    await page.route_web_socket(re.compile(".*"), lambda ws: ws.close())
+                    # Routing on the context also covers popups and frames the page opens.
+                    await context.route("**/*", guard)
+                    # Routing does not see WebSockets: refuse them all (SSRF via ws://127.0.0.1)
+                    await context.route_web_socket(re.compile(".*"), lambda ws: ws.close())
                     await page.goto(args.url, wait_until="domcontentloaded", timeout=30_000)
                     title = await page.title()
                     text = await page.inner_text("body")

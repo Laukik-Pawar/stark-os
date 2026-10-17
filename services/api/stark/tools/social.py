@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import unicodedata
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
@@ -57,7 +58,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 }
 
 URL_RE = re.compile(r"https?://[^\s<>\"']*[^\s<>\"'.,;:!?)\]]")  # trailing punctuation is not part of a link
-HASHTAG_RE = re.compile(r"(?<![\w&])#([A-Za-z0-9_]{1,100})")
+HASHTAG_RE = re.compile(r"(?<![\w&])#(\w{1,100})")  # \w is Unicode-aware: #café, #日本
 MENTION_RE = re.compile(r"(?<![\w])@[A-Za-z0-9_.\-]{2,}")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?<![\w+])(?:\+\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\w)")
@@ -73,11 +74,56 @@ GIVEAWAY = ("giveaway", "give away", "contest", "sweepstake", "win a ", "chance 
 GIVEAWAY_RULES = ("rules", "terms", "no purchase necessary", "t&c", "t&cs", "eligibility")
 
 
+def grapheme_len(text: str) -> int:
+    """Approximate count of user-perceived characters (what Bluesky's 300 limit counts) without extra
+    dependencies: combining marks, variation selectors, skin-tone modifiers, emoji tag characters and
+    zero-width-joined sequences count once, and a flag (two regional indicators) counts once."""
+    count = 0
+    joined = False
+    regional = False
+    for ch in text:
+        cp = ord(ch)
+        if joined:  # the character after a zero-width joiner belongs to the same cluster
+            joined = False
+            continue
+        if cp == 0x200D:
+            joined = True
+            continue
+        if (unicodedata.combining(ch) or 0xFE00 <= cp <= 0xFE0F or 0x1F3FB <= cp <= 0x1F3FF
+                or 0xE0020 <= cp <= 0xE007F or unicodedata.category(ch) == "Me"):
+            continue
+        if 0x1F1E6 <= cp <= 0x1F1FF:  # regional indicators pair up into one flag
+            regional = not regional
+            if not regional:
+                continue
+        else:
+            regional = False
+        count += 1
+    return count
+
+
+def find_urls(text: str) -> list[tuple[int, int]]:
+    """URL spans. A closing parenthesis is kept when it balances one inside the URL (Wikipedia links)."""
+    spans = []
+    for m in URL_RE.finditer(text):
+        end = m.end()
+        while end < len(text) and text[end] == ")" and text[m.start():end].count("(") > text[m.start():end].count(")"):
+            end += 1
+        spans.append((m.start(), end))
+    return spans
+
+
 def weighted_length(platform: str, text: str) -> int:
+    if platform == "bluesky":
+        return grapheme_len(text)
     weight = PLATFORMS[platform].get("url_weight")
     if not weight:
         return len(text)
-    return len(URL_RE.sub("x" * weight, text))
+    out, last = [], 0
+    for a, b in find_urls(text):
+        out.append(text[last:a] + "x" * weight)
+        last = b
+    return len("".join(out) + text[last:])
 
 
 def check_post(platform: str, text: str, *, thread: list[str] | None = None, media: list[dict] | None = None,
@@ -100,6 +146,8 @@ def check_post(platform: str, text: str, *, thread: list[str] | None = None, med
         if n > spec["limit"]:
             where = "post" if i == 0 else f"thread part {i + 1}"
             add("fail", "too_long", f"{where} is {n} characters; {spec['name']} allows {spec['limit']}.")
+        if platform == "bluesky" and len(part.encode()) > 3000:
+            add("fail", "too_long", f"{'post' if i == 0 else f'thread part {i + 1}'} is over Bluesky's 3000-byte limit.")
     for name, rx, _sev in SECRET_RULES:
         if rx.search(full):
             add("fail", "secret", f"Looks like a credential ({name}). Never post keys or passwords.")
@@ -132,7 +180,7 @@ def check_post(platform: str, text: str, *, thread: list[str] | None = None, med
     if EMAIL_RE.search(full) or PHONE_RE.search(full):
         add("warn", "personal_data", "Contains an email address or phone number: post only public business "
                                      "contacts, never someone's personal details.")
-    for url in URL_RE.findall(full):
+    for url in (full[a:b] for a, b in find_urls(full)):
         if url.startswith("http://"):
             add("warn", "insecure_link", f"Link is not HTTPS: {url}")
         if any(f"//{s}/" in url or url.endswith(f"//{s}") for s in SHORTENERS):
@@ -216,6 +264,11 @@ def tid_for(item_id: str, created_at: str, part: int) -> str:
     return out
 
 
+def _short_hash(text: str) -> str:
+    """Content-dependent part of an idempotency key: an edited post is a new request."""
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
 def _strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).replace("&amp;", "&").replace(
         "&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'").strip()
@@ -224,14 +277,16 @@ def _strip_html(html: str) -> str:
 def bluesky_facets(text: str) -> list[dict[str, Any]]:
     """Rich-text facets (UTF-8 byte offsets) so links and hashtags are clickable on Bluesky."""
     facets, spans = [], []
-    for m in URL_RE.finditer(text):
-        spans.append((m.start(), m.end()))
-        start, end = len(text[:m.start()].encode()), len(text[:m.end()].encode())
+    for a, b in find_urls(text):
+        spans.append((a, b))
+        start, end = len(text[:a].encode()), len(text[:b].encode())
         facets.append({"index": {"byteStart": start, "byteEnd": end},
-                       "features": [{"$type": "app.bsky.richtext.facet#link", "uri": m.group(0)}]})
+                       "features": [{"$type": "app.bsky.richtext.facet#link", "uri": text[a:b]}]})
     for m in HASHTAG_RE.finditer(text):
         if any(a <= m.start() < b for a, b in spans):
             continue  # a #fragment inside a link: facets must not overlap
+        if m.group(1).isdigit():
+            continue  # Bluesky does not treat all-number hashtags (#2026) as tags
         start, end = len(text[:m.start()].encode()), len(text[:m.end()].encode())
         facets.append({"index": {"byteStart": start, "byteEnd": end},
                        "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": m.group(1)}]})
@@ -290,6 +345,14 @@ class BlueskyAdapter:
                                             params={"repo": sess["did"], "collection": "app.bsky.feed.post",
                                                     "rkey": rkey})
                 if existing.status_code == 200:  # already posted by an earlier, interrupted attempt
+                    live_text = ((existing.json().get("value") or {}).get("text"))
+                    if live_text is not None and live_text != part:
+                        # The post was edited after an attempt that did reach Bluesky. Never report the new
+                        # text as published while the old one is what people see.
+                        raise AdapterError(
+                            "An earlier attempt already published a different version of this post on Bluesky "
+                            f"(at://{sess['did']}/app.bsky.feed.post/{rkey}). Delete it on Bluesky, or restore the "
+                            "original text, then publish again.")
                     ref = {"uri": existing.json()["uri"], "cid": existing.json()["cid"]}
                     first = first or ref
                     on_part(n, self._ref(ref, sess))
@@ -382,7 +445,7 @@ class MastodonAdapter:
                 if reply_to:
                     body["in_reply_to_id"] = reply_to
                 r = await client.post("/api/v1/statuses", data=body,
-                                      headers={"Idempotency-Key": f"{item['id']}-{n}"})
+                                      headers={"Idempotency-Key": f"{item['id']}-{_short_hash(part)}-{n}"})
                 if r.status_code not in (200, 201):
                     raise AdapterError(f"Mastodon rejected the post ({r.status_code}): {r.text[:200]}")
                 status = r.json()
@@ -837,8 +900,13 @@ class SocialSchedule(Tool):
         if (item.get("check") or {}).get("verdict") == "fail":
             return ToolResult(False, "Fix the failing policy check before scheduling", item["check"],
                               error="check_failed")
-        data = _update(ctx.kernel, args.item_id, status="scheduled", scheduled_for=when)
-        return ToolResult(True, f"{args.item_id} scheduled for {when.isoformat()}", summarize(data))
+        # An owner's auto-publish approval covers a specific text *and* time. An agent moving the
+        # time (or re-arming a failed post) must not inherit it: the owner approves again.
+        had_auto = bool(item.get("auto_publish"))
+        data = _update(ctx.kernel, args.item_id, status="scheduled", scheduled_for=when, auto_publish=False,
+                       approved_fp=None, approved_at=None)
+        note = " Its earlier auto-publish approval was cleared; the owner must approve again." if had_auto else ""
+        return ToolResult(True, f"{args.item_id} scheduled for {when.isoformat()}.{note}", summarize(data))
 
 
 class DiscardInput(BaseModel):
@@ -1019,7 +1087,8 @@ async def publish_item(kernel, social: "Social", settings, item_id: str, *, appr
                                 summarize(data), error="partial_publish")
         else:
             _update(kernel, item_id, status="failed",
-                    error=f"{reason}. No post was confirmed; retrying is safe (requests are idempotent).")
+                    error=(f"{reason}. No post was confirmed. Retrying the same text is safe; if more than an hour has "
+                           "passed, check your profile first in case the post went out."))
             result = ToolResult(False, f"Publishing failed: {reason}", error="platform_error")
         if interrupted or not isinstance(exc, Exception):
             raise

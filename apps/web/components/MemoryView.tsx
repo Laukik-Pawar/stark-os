@@ -9,8 +9,9 @@ import { Empty, Section, timeAgo } from "./ui";
 const LAYERS = ["", "preference", "episodic", "semantic", "agent", "project", "procedural"];
 
 export function MemoryView() {
-  const { client, notify, events } = useStark();
+  const { client, notify, eventSeq } = useStark();
   const [items, setItems] = useState<Memory[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [ns, setNs] = useState("");
   const [layer, setLayer] = useState("");
@@ -36,7 +37,7 @@ export function MemoryView() {
     }
   }, [client, ns, layer, q, notify]);
 
-  const memEvents = events.filter((e) => e.type.startsWith("memory.")).length;
+  const memEvents = eventSeq.memory ?? 0;
   useEffect(() => {
     const t = setTimeout(load, q ? 250 : 0); // debounce typing; reload on memory events
     return () => clearTimeout(t);
@@ -62,7 +63,7 @@ export function MemoryView() {
       a.href = URL.createObjectURL(blob);
       a.download = "stark-memory-export.json";
       a.click();
-      URL.revokeObjectURL(a.href);
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000); // revoking at once can cancel the download
     } catch (e: any) {
       notify("error", e.message);
     }
@@ -146,9 +147,18 @@ export function MemoryView() {
                       <Pencil size={12} />
                     </button>
                   )}
-                  <button className="btn btn-danger !px-2 !py-1" aria-label="Delete" onClick={() => act(() => client.del(`/api/memory/${m.id}`), "Memory deleted")}>
-                    <Trash2 size={12} />
-                  </button>
+                  {confirmDelete === m.id ? (
+                    <>
+                      <button className="btn btn-danger !px-2 !py-1 text-xs" onClick={() => act(() => client.del(`/api/memory/${m.id}`), "Memory deleted")}>
+                        Delete
+                      </button>
+                      <button className="btn !px-2 !py-1 text-xs" onClick={() => setConfirmDelete(null)}>Keep</button>
+                    </>
+                  ) : (
+                    <button className="btn btn-danger !px-2 !py-1" aria-label="Delete" onClick={() => setConfirmDelete(m.id)}>
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </span>
               </div>
               {editing === m.id ? (

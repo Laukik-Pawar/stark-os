@@ -1,8 +1,10 @@
-# STARK OS — Project Genesis
+# STARK OS: free open-source AI social media manager
 
-[![CI](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE) ![Free models](https://img.shields.io/badge/models-free%20OpenRouter-34d399)
+[![CI](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE) ![Free models](https://img.shields.io/badge/models-free%20OpenRouter-34d399) [![Website](https://img.shields.io/badge/website-stark--os-22d3ee)](https://shahrukhalid.github.io/stark-os/)
 
-A real, runnable **multi-agent social media team**: seven AI agents, each with its own brain, role and limits, who plan campaigns, write posts, run your community inbox, research trends, stress-test content for backlash and publish — **only after you approve each post**.
+A free, self-hosted **AI social media manager** that works like a real team: seven AI agents, each with its own brain, role and limits, plan campaigns, write posts for Bluesky, Mastodon, X, LinkedIn and more, run your community inbox, research trends, stress-test content for backlash and schedule it. Nothing is published **until you approve each post**. Think of it as an open-source, AI-first alternative to paid social media schedulers.
+
+**Website:** https://shahrukhalid.github.io/stark-os/
 
 The agents are modelled on the AI personas in Vision's Mindspace from Marvel's **VisionQuest** (Disney+, 2026): J.A.R.V.I.S., F.R.I.D.A.Y., E.D.I.T.H., Ultron, Jocasta, D.U.M.-E. and U. Each one's job comes from the role that character has in the series.
 
@@ -122,6 +124,23 @@ docs/                   ARCHITECTURE, DECISIONS, IMPLEMENTATION_STATUS, TASKS
 - Secrets live only in `.env` (git-ignored) and are redacted from logs. The API binds to 127.0.0.1 and requires a random token.
 - Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
+## FAQ
+
+**Is there a free, open-source AI social media manager?**
+Yes: STARK OS is MIT licensed, runs on your own computer and uses free OpenRouter models. It never calls a paid model unless you turn that on.
+
+**Can it post to Bluesky and Mastodon automatically?**
+Yes, through their free APIs, including threads and replies. Scheduled posts go out on their own only if you approved that exact text for that time.
+
+**What about X (Twitter), LinkedIn and Instagram?**
+Their posting APIs need paid or reviewed access, so STARK OS writes posts sized and checked for each platform and you paste them with one click.
+
+**Can the AI post without my permission?**
+No. Only the publisher agent can publish, only after your approval of the exact text. Any edit, by you or an agent, cancels the approval.
+
+**Where are my social media logins stored?**
+Only on your computer (`data/social_accounts.json`, readable by your user only). There is no cloud service.
+
 ## Contributing
 
 Issues, ideas and pull requests are welcome. New here? Pick a [good first issue](https://github.com/Shahrukhalid/stark-os/labels/good%20first%20issue). See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and [ACCESSIBILITY.md](ACCESSIBILITY.md). Questions go to [Discussions](https://github.com/Shahrukhalid/stark-os/discussions).
@@ -135,3 +154,5 @@ STARK OS is an independent, non-commercial, fan-made engineering project. It is 
 [MIT](LICENSE). Use it, fork it, modify it. The license covers the code and original text only and grants no rights in any Marvel, Disney or other third-party trademark, character or copyrighted work.
 
 If STARK OS is useful to you, please ⭐ star the repo and share what you build with it.
+
+Also by the same author: **[Verilive](https://github.com/Shahrukhalid/verilive)**, a free, in-browser deepfake check for Zoom, Meet and Teams calls.

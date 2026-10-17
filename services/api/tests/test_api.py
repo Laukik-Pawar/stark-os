@@ -178,3 +178,21 @@ def test_models_endpoints_with_openrouter_pool(settings):
         res = c.post("/api/models/ping", json={"models": ["cohere/north-mini-code:free"]}).json()
         assert res["results"][0]["ok"] and res["results"][0]["tool_calling"]
         assert "sk-or-test" not in json.dumps([status, info, res])
+
+
+def test_tool_run_rejects_bad_input_cleanly(client):
+    r = client.post("/api/tools/fs.read/run", json={"path": "a\u0000b"})
+    assert r.status_code == 200 and r.json()["result"]["ok"] is False
+    assert r.json()["task"]["status"] == "failed"  # never left stuck in "queued"
+    r = client.post("/api/tools/fs.read/run", content=b"{not json", headers={"content-type": "application/json"})
+    assert r.status_code == 400
+    r = client.post("/api/tools/fs.read/run", json=["not", "an", "object"])
+    assert r.status_code == 400
+
+
+def test_data_folder_is_private(settings, client):
+    import os
+    import stat
+
+    if os.name != "nt":
+        assert stat.S_IMODE(settings.data_dir.stat().st_mode) == 0o700

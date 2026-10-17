@@ -18,6 +18,8 @@ interface StarkState {
   approvals: Approval[];
   tasks: Task[];
   events: StarkEvent[];
+  /** Running count of events per type prefix ("content", "memory", ...). Views reload when theirs changes. */
+  eventSeq: Record<string, number>;
   toasts: Toast[];
   error: string | null;
   listeningAgent: string | null;
@@ -44,6 +46,8 @@ export function StarkProvider({ conn, children, onAuthError }: { conn: Connectio
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<StarkEvent[]>([]);
+  const [eventSeq, setEventSeq] = useState<Record<string, number>>({});
+  const wasConnected = useRef<boolean | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [listeningAgent, setListeningAgent] = useState<string | null>(null);
@@ -91,6 +95,8 @@ export function StarkProvider({ conn, children, onAuthError }: { conn: Connectio
     const stop = client.events(
       (ev) => {
         setEvents((prev) => [...prev.slice(-299), ev]);
+        const prefix = ev.type.split(".")[0]!;
+        setEventSeq((prev) => ({ ...prev, [prefix]: (prev[prefix] ?? 0) + 1 }));
         switch (ev.type) {
           case "agent.status":
             setAgents((prev) => prev.map((a) => (a.id === ev.data.agent_id ? { ...a, live: { ...a.live, ...ev.data } as Agent["live"] } : a)));
@@ -124,7 +130,15 @@ export function StarkProvider({ conn, children, onAuthError }: { conn: Connectio
             break;
         }
       },
-      (ok) => setSse(ok),
+      (ok) => {
+        setSse(ok);
+        // Events sent while the stream was down are lost: reload everything after a reconnect.
+        if (ok && wasConnected.current === false) {
+          refresh();
+          setEventSeq((prev) => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v + 1])));
+        }
+        if (ok || wasConnected.current !== null) wasConnected.current = ok;
+      },
     );
     const poll = setInterval(loadStatus, 20000);
     return () => {
@@ -137,7 +151,7 @@ export function StarkProvider({ conn, children, onAuthError }: { conn: Connectio
   const agentById = useCallback((id: string) => agents.find((a) => a.id === id), [agents]);
 
   const value: StarkState = {
-    client, sseConnected, status, agents, approvals, tasks, events, toasts, error,
+    client, sseConnected, status, agents, approvals, tasks, events, eventSeq, toasts, error,
     listeningAgent, setListeningAgent, refresh, notify, dismiss, agentById,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

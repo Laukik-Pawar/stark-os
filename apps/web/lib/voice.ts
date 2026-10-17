@@ -56,6 +56,15 @@ export function sttSupported(): boolean {
   return typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 }
 
+/** Time the dashboard last finished speaking, so the microphone can ignore its own voice. */
+let lastSpokeAt = 0;
+
+/** True while the dashboard is speaking (and briefly after), so wake-word mode ignores its own replies. */
+export function isSpeaking(): boolean {
+  if (!ttsSupported()) return false;
+  return window.speechSynthesis.speaking || Date.now() - lastSpokeAt < 1500;
+}
+
 export function speak(text: string, profile: VoiceProfile, onEnd?: () => void): void {
   if (profile.muted || !ttsSupported()) {
     onEnd?.();
@@ -69,8 +78,14 @@ export function speak(text: string, profile: VoiceProfile, onEnd?: () => void): 
   u.lang = voice?.lang || profile.lang;
   u.pitch = Math.max(0, Math.min(2, profile.pitch));
   u.rate = Math.max(0.5, Math.min(2, profile.rate));
-  u.onend = () => onEnd?.();
-  u.onerror = () => onEnd?.();
+  u.onend = () => {
+    lastSpokeAt = Date.now();
+    onEnd?.();
+  };
+  u.onerror = () => {
+    lastSpokeAt = Date.now();
+    onEnd?.();
+  };
   synth.speak(u);
 }
 
@@ -102,18 +117,27 @@ export function createRecognizer(opts: {
     active = true;
     opts.onState?.(true);
   };
+  let restartDelay = 0;
   rec.onend = () => {
     opts.onState?.(false);
     if (active && opts.continuous) {
-      try {
-        rec.start(); // keep wake-word mode alive
-      } catch {
-        /* already started */
-      }
+      // Restart to keep wake-word mode alive; back off after network errors instead of looping.
+      setTimeout(() => {
+        if (!active) return;
+        try {
+          rec.start();
+        } catch {
+          /* already started */
+        }
+      }, restartDelay);
     }
   };
   rec.onerror = (e: any) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") active = false;
+    restartDelay = e.error === "network" ? Math.min(30000, Math.max(2000, restartDelay * 2)) : 0;
+    // Silence and our own restarts are normal in continuous mode: don't flood the screen with toasts.
+    if (opts.continuous && (e.error === "no-speech" || e.error === "aborted")) return;
+    if (opts.continuous && e.error === "network" && restartDelay > 2000) return; // already reported once
     opts.onError?.(e.error === "not-allowed" ? "Microphone permission denied" : `Speech error: ${e.error}`);
   };
   rec.onresult = (e: any) => {

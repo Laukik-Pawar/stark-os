@@ -460,16 +460,23 @@ class Kernel:
         except ValidationError as exc:
             return ToolResult(False, f"Invalid input for {tool.id}", error=str(exc)[:800])
 
-        if agent is not None:
-            decision = self.perms.decide(agent, tool, args, ctx)
-        else:  # direct user invocation from the Tools panel: read-only tools only
-            from .permissions import Decision
+        try:
+            if agent is not None:
+                decision = self.perms.decide(agent, tool, args, ctx)
+            else:  # direct user invocation from the Tools panel: read-only tools only
+                from .permissions import Decision
 
-            allowed = tool.risk is Risk.READ and not tool.needs_approval(args, ctx) and not self.perms.emergency_stop
-            decision = Decision(Verdict.ALLOW if allowed else Verdict.DENY,
-                                "user read-only tool run" if allowed else
-                                "only read-only tools can be run directly; ask an agent instead",
-                                self.perms.global_mode)
+                allowed = (tool.risk is Risk.READ and not tool.needs_approval(args, ctx)
+                           and not self.perms.emergency_stop)
+                decision = Decision(Verdict.ALLOW if allowed else Verdict.DENY,
+                                    "user read-only tool run" if allowed else
+                                    "only read-only tools can be run directly; ask an agent instead",
+                                    self.perms.global_mode)
+        except Exception as exc:  # a malformed request must fail this one call, never the whole task
+            log.warning("permission check failed", extra={"ctx": {"tool": tool.id, "error": exc.__class__.__name__}})
+            self.obs.audit(actor, f"tool:{tool.id}", "denied", task_id=ctx.task_id,
+                           detail={"reason": f"invalid request: {exc.__class__.__name__}"})
+            return ToolResult(False, f"Invalid request for {tool.id}: {str(exc)[:200]}", error="invalid_request")
         self.bus.publish("tool.call", {"task_id": ctx.task_id, "agent_id": actor, "tool": tool.id,
                                        "input": args.model_dump(mode="json"), "verdict": decision.verdict.value,
                                        "reason": decision.reason})
@@ -479,7 +486,10 @@ class Kernel:
             return ToolResult(False, f"Permission denied: {decision.reason}", error="permission_denied")
 
         if decision.verdict is Verdict.APPROVAL:
-            text = tool.describe(args, ctx)
+            try:
+                text = tool.describe(args, ctx)
+            except Exception as exc:  # never wait for an approval that cannot even be described
+                return ToolResult(False, f"Invalid request for {tool.id}: {str(exc)[:200]}", error="invalid_request")
             approval = self.approvals.create(
                 task_id=ctx.task_id, agent_id=actor, tool_id=tool.id, action=text.action, target=text.target,
                 effects=text.effects, risks=text.risks,

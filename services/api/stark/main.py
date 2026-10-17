@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import platform
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -43,12 +44,25 @@ from .tools import build_registry
 from .tools import social as social_tools
 
 
+def _owner_only(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:  # e.g. Windows or a read-only mount: best effort
+        pass
+
+
 def build_kernel(settings: Settings, providers: dict[str, ModelProvider] | None = None) -> Kernel:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    _owner_only(settings.data_dir, 0o700)  # conversations, memories and logins: owner only
     for root in settings.workspace_roots:
         root.mkdir(parents=True, exist_ok=True)
     db = Database(settings.database_url)
     db.create_all()
+    if settings.database_url.startswith("sqlite:///"):
+        db_file = Path(settings.database_url.removeprefix("sqlite:///"))
+        for f in (db_file, db_file.with_name(db_file.name + "-wal"), db_file.with_name(db_file.name + "-shm")):
+            if f.exists():
+                _owner_only(f, 0o600)
     bus = EventBus()
     tools = build_registry(settings)
     registry = AgentRegistry.load(settings.agents_dir, known_tools=tools.ids())
@@ -116,6 +130,10 @@ class MastodonIn(BaseModel):
 
 class ItemActionIn(BaseModel):
     fingerprint: str = Field(..., min_length=64, max_length=64, description="from the queue: the text you saw")
+
+
+class PublishIn(ItemActionIn):
+    live: bool | None = Field(None, description="what the dashboard told you: true = real post, false = simulation")
 
 
 class ScheduleIn(ItemActionIn):
@@ -351,9 +369,15 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
         return item
 
     @app.post("/api/social/items/{item_id}/publish", dependencies=[api])
-    async def publish_now(item_id: str, body: ItemActionIn, k: Kernel = Depends(kernel)):
+    async def publish_now(item_id: str, body: PublishIn, k: Kernel = Depends(kernel)):
         """You clicked Publish on the exact text shown: that click is the approval."""
-        _item_or_404(k, item_id, body.fingerprint)
+        item = _item_or_404(k, item_id, body.fingerprint)
+        if body.live is not None:
+            really_live = _social(k).adapter(item["platform"]) is not None
+            if really_live != body.live:
+                # Never post publicly when the person clicked "Run simulation" (or claim a simulation was real).
+                raise HTTPException(409, "Your account connection changed since this page loaded. "
+                                         "Refresh and check whether this will post for real.")
         res = await social_tools.publish_item(k, _social(k), settings, item_id, approved_fp=body.fingerprint,
                                               actor="user")
         k.obs.audit("user", "social.publish", "ok" if res.ok else "error", target=item_id,
@@ -647,7 +671,12 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
     async def run_tool(tool_id: str, request: Request, k: Kernel = Depends(kernel)):
         if tool_id not in k.tools.ids():
             raise HTTPException(404, "unknown tool")
-        args = await request.json() if await request.body() else {}
+        try:
+            args = await request.json() if await request.body() else {}
+        except ValueError:
+            raise HTTPException(400, "request body must be JSON") from None
+        if not isinstance(args, dict):
+            raise HTTPException(400, "request body must be a JSON object")
         return await k.run_tool_as_user(tool_id, args)
 
     # ---------------------------------------------------------- observability

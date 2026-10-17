@@ -32,7 +32,7 @@ function inAnHour(): string {
 
 /** The content queue: everything your agents drafted. You publish, schedule or discard from here. */
 export function ContentView({ talkTo }: { talkTo: (agentId: string, text?: string) => void }) {
-  const { client, notify, events } = useStark();
+  const { client, notify, eventSeq } = useStark();
   const [items, setItems] = useState<ContentItem[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [paused, setPaused] = useState(false);
@@ -55,7 +55,7 @@ export function ContentView({ talkTo }: { talkTo: (agentId: string, text?: strin
     }
   }, [client, notify, status]);
 
-  const contentEvents = useMemo(() => events.filter((e) => e.type.startsWith("content.")).length, [events]);
+  const contentEvents = eventSeq.content ?? 0;
   useEffect(() => {
     load();
   }, [load, contentEvents]);
@@ -124,17 +124,18 @@ function PostCard({ item: it, account, onChange, talkTo }: { item: ContentItem; 
   const [when, setWhen] = useState(inAnHour);
   const [auto, setAuto] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const live = account?.mode === "connected";
   const editable = ["draft", "scheduled", "failed"].includes(it.status);
   const failing = it.check?.verdict === "fail";
   const fullText = [it.text, ...(it.thread || [])].join("\n\n");
 
-  async function act(fn: () => Promise<any>, ok?: string) {
+  async function act(fn: () => Promise<any>, ok?: string | ((res: any) => string)) {
     setBusy(true);
     try {
       const res = await fn();
       if (res && res.ok === false) notify("error", res.summary || "Not published");
-      else if (ok) notify("success", typeof ok === "string" ? ok : "Done");
+      else if (ok) notify("success", typeof ok === "function" ? ok(res) : ok);
       setMode("none");
       onChange();
     } catch (e: any) {
@@ -194,7 +195,15 @@ function PostCard({ item: it, account, onChange, talkTo }: { item: ContentItem; 
 
       {editable && mode === "none" && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <button className="btn btn-primary !py-1 text-xs" disabled={busy || failing} onClick={() => setMode("publish")} title={failing ? "Fix the failing check first" : ""}>
+          <button
+            className="btn btn-primary !py-1 text-xs"
+            disabled={busy || failing}
+            onClick={() => {
+              onChange(); // reload accounts so the live/simulation wording is current
+              setMode("publish");
+            }}
+            title={failing ? "Fix the failing check first" : ""}
+          >
             <Send size={13} /> {live ? "Publish now" : "Publish (simulation)"}
           </button>
           <button className="btn !py-1 text-xs" disabled={busy || failing} onClick={() => setMode("schedule")}>
@@ -211,9 +220,18 @@ function PostCard({ item: it, account, onChange, talkTo }: { item: ContentItem; 
               <X size={13} /> Unschedule
             </button>
           )}
-          <button className="btn btn-danger !py-1 text-xs" disabled={busy} onClick={() => act(() => client.post(`/api/social/items/${it.id}/discard`), "Discarded")}>
-            <Trash2 size={13} /> Discard
-          </button>
+          {confirmDiscard ? (
+            <span className="inline-flex items-center gap-1">
+              <button className="btn btn-danger !py-1 text-xs" disabled={busy} onClick={() => act(() => client.post(`/api/social/items/${it.id}/discard`), "Discarded")}>
+                <Trash2 size={13} /> Yes, discard
+              </button>
+              <button className="btn !py-1 text-xs" onClick={() => setConfirmDiscard(false)}>Keep</button>
+            </span>
+          ) : (
+            <button className="btn btn-danger !py-1 text-xs" disabled={busy} onClick={() => setConfirmDiscard(true)}>
+              <Trash2 size={13} /> Discard
+            </button>
+          )}
         </div>
       )}
 
@@ -230,7 +248,13 @@ function PostCard({ item: it, account, onChange, talkTo }: { item: ContentItem; 
             <button
               className="btn btn-primary"
               disabled={busy}
-              onClick={() => act(() => client.post(`/api/social/items/${it.id}/publish`, { fingerprint: it.fingerprint }), live ? "Published" : "Simulated publish recorded")}
+              onClick={() =>
+                act(
+                  () => client.post(`/api/social/items/${it.id}/publish`, { fingerprint: it.fingerprint, live }),
+                  // Trust what the server did, not what the page assumed.
+                  (res) => (res?.simulated ? "Simulated publish recorded: nothing was sent" : "Published"),
+                )
+              }
             >
               <Check size={14} /> {live ? "Yes, publish" : "Run simulation"}
             </button>

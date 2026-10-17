@@ -44,10 +44,15 @@ def resolve_in_roots(raw: str, roots: list[Path]) -> Path:
     """Resolve ``raw`` (absolute, or relative to the first root) and require it to stay inside a root."""
     if not roots:
         raise PathError("no workspace roots configured")
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = roots[0] / candidate
-    resolved = candidate.resolve()
+    if "\x00" in raw:
+        raise PathError("path contains a null byte")
+    try:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = roots[0] / candidate
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:  # e.g. unknown ~user, symlink loops
+        raise PathError(f"{raw} is not a usable path ({exc.__class__.__name__})") from None
     for root in roots:
         if resolved == root or root in resolved.parents:
             return resolved

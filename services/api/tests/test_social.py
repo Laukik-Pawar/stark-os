@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -297,7 +299,7 @@ async def test_mastodon_adapter(settings):
     assert res.ok and res.data["external_url"] == "https://social.example/@brand/101"
     (p1, key1), (p2, _) = seen["posts"]
     assert p1["visibility"] == "public" and "in_reply_to_id" not in p1 and p2["in_reply_to_id"] == "101"
-    assert key1 == f"{item['id']}-0"
+    assert key1.startswith(f"{item['id']}-") and key1.endswith("-0")
     inbox = await SocialInbox(sc).run(SocialInbox.Input(platform="mastodon"), _ctx(k, "friday"))
     assert inbox.data["messages"][0]["text"] == "Love it & thanks!"
     stats = await SocialAnalytics(sc).run(SocialAnalytics.Input(), _ctx(k, "jocasta"))
@@ -487,3 +489,69 @@ def test_facets_do_not_overlap_and_claims_use_tool_results():
         assert meta["unsupported_publish_claim"], phrase
     _, meta = verify_content_claims("Posted to Bluesky!", {}.get, confirmed_publish=True)
     assert not meta["unsupported_publish_claim"]
+
+
+async def test_agent_rescheduling_clears_owner_auto_publish_approval(settings):
+    """An approval covers a text and a time. An agent moving the time must not inherit it."""
+    k, _ = make_kernel(settings)
+    item = await _draft(k)
+    fp = social.fingerprint(social._item(k, item["id"]))
+    social._update(k, item["id"], status="scheduled", scheduled_for=datetime.now(timezone.utc) + timedelta(days=7),
+                   auto_publish=True, approved_fp=fp, approved_at=datetime.now(timezone.utc))
+    sch = k.tools.get("social.schedule")
+    res = await sch.run(sch.Input(item_id=item["id"], when=datetime.now(timezone.utc) + timedelta(seconds=1)),
+                        _ctx(k, "dum_e"))
+    assert res.ok and "approve again" in res.summary
+    stored = social._item(k, item["id"])
+    assert stored["auto_publish"] is False and stored["approved_fp"] is None
+    await asyncio.sleep(1.2)
+    out = await social.run_scheduler_once(k, k.tools.get("social.publish").social, settings)
+    assert not out or all(o.get("outcome") != "published" for o in (out if isinstance(out, list) else [out]))
+    assert social._item(k, item["id"])["status"] == "scheduled"
+
+
+async def test_bluesky_retry_after_edit_does_not_claim_new_text_is_live(settings):
+    """An interrupted attempt posted the old text; after an edit, the retry must not mark the new text published."""
+    settings.bluesky_handle, settings.bluesky_app_password = "brand.bsky.social", "app-pass-1234"
+    seen: dict = {"stored": {}}
+    k, _ = make_kernel(settings)
+    item = await _draft(k)
+    rkey = social.tid_for(item["id"], k._content_item(item["id"])["created_at"], 0)
+    seen["stored"][rkey] = {"uri": f"at://did:plc:abc/app.bsky.feed.post/{rkey}", "cid": "cid-old",
+                            "value": {"text": "An older version with a typo"}}
+    sc = Social(settings, _bsky_transport(seen))
+    res = await social.SocialPublish(sc).run(social.SocialPublish.Input(item_id=item["id"]), _ctx(k, "dum_e"))
+    assert not res.ok and "records" not in seen
+    row = k._content_item(item["id"])
+    assert row["status"] == "failed" and "different version" in row["error"]
+
+
+async def test_mastodon_idempotency_key_changes_with_the_text(settings):
+    settings.mastodon_base_url, settings.mastodon_access_token = "https://social.example", "masto-token-123"
+    keys: list[str] = []
+
+    async def handler(req: httpx.Request):
+        keys.append(req.headers["idempotency-key"])
+        return httpx.Response(200, json={"id": str(len(keys)), "url": f"https://social.example/@b/{len(keys)}"})
+
+    k, _ = make_kernel(settings)
+    sc = Social(settings, httpx.MockTransport(handler))
+    a = await _draft(k, platform="mastodon", text="First wording")
+    await sc.adapter("mastodon").publish(k._content_item(a["id"]), lambda n, ref: None)
+    item = dict(k._content_item(a["id"]), text="Second wording")
+    await sc.adapter("mastodon").publish(item, lambda n, ref: None)
+    assert keys[0] != keys[1] and keys[0].endswith("-0") and keys[1].endswith("-0")
+
+
+def test_bluesky_text_handling_matches_the_platform():
+    from stark.tools.social import grapheme_len
+
+    tags = [f["features"][0]["tag"] for f in bluesky_facets("Bonjour #café #日本 #2026 #launch")
+            if f["features"][0]["$type"].endswith("#tag")]
+    assert tags == ["café", "日本", "launch"]
+    link = bluesky_facets("Read https://en.wikipedia.org/wiki/Foo_(bar). Thanks")[0]["features"][0]["uri"]
+    assert link == "https://en.wikipedia.org/wiki/Foo_(bar)"
+    family = "\U0001F468‍\U0001F469‍\U0001F467"
+    assert grapheme_len(family) == 1 and grapheme_len("\U0001F1FA\U0001F1F8") == 1 and grapheme_len("é") == 1
+    assert grapheme_len("\U0001F44D\U0001F3FD") == 1
+    assert social.check_post("bluesky", family * 80)["verdict"] != "fail"

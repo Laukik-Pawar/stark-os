@@ -271,3 +271,70 @@ async def test_browser_checks_every_redirect_hop(kctx, settings, monkeypatch):
     finally:
         server.shutdown()
     assert "INTERNAL SECRET" not in (res.data.get("text") or "")
+
+
+async def test_browser_blocks_service_worker_requests(kctx, settings, monkeypatch):
+    """Service-worker fetches bypass request routing, so a rendered page must not be able to start one."""
+    pytest.importorskip("playwright", reason="install the 'browser' extra")
+    import time
+
+    from stark.tools import web
+
+    k, ctx = kctx
+    settings.allow_private_fetch = True
+    hits: list[str] = []
+
+    class Internal(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"secret")
+
+    internal = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Internal)
+    iport = internal.server_port
+
+    class Site(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path == "/slow":  # keeps the page loading while the worker would install
+                time.sleep(2)
+                body, ctype = b"0", "text/javascript"
+            elif self.path == "/sw.js":
+                body = (f"self.addEventListener('install', e => e.waitUntil(fetch('http://127.0.0.1:{iport}/from-sw', "
+                        "{mode: 'no-cors'}).catch(() => 0)));").encode()
+                ctype = "text/javascript"
+            else:
+                body = (b"<html><title>sw</title><body>page<script>navigator.serviceWorker && "
+                        b"navigator.serviceWorker.register('/sw.js');</script><script defer src='/slow'></script>"
+                        b"</body></html>")
+                ctype = "text/html"
+            self.send_response(200)
+            self.send_header("content-type", ctype)
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    for s in (internal, site):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    real = web.check_url
+
+    async def guarded(url, allow_private=False):
+        if f":{iport}" in url:  # stands in for an internal-only service
+            raise web.FetchBlocked("internal host")
+        return await real(url, allow_private)
+
+    monkeypatch.setattr(web, "check_url", guarded)
+    try:
+        res = await BrowserRender().run(BrowserRender.Input(url=f"http://127.0.0.1:{site.server_port}/"), ctx("jocasta"))
+    finally:
+        site.shutdown()
+        internal.shutdown()
+    assert res.ok, res.summary
+    assert hits == []
