@@ -1,6 +1,6 @@
 # Implementation status
 
-_Last updated: 2026-10-16 · release 0.4.0 (connect accounts in the dashboard, approved auto-publishing, Start page)_
+_Last updated: 2026-10-17 · release 0.5.0 (Autopilot: automatic research, SEO, writing, fact-checking and scheduling with trust levels)_
 
 Legend: ✅ **Implemented & tested** · 🟡 **Implemented, not fully live-tested** · 🔑 **Requires credentials** · 🧪 **Simulated** · 📋 **Planned** · ⛔ **Unsupported by design**
 
@@ -8,12 +8,18 @@ Legend: ✅ **Implemented & tested** · 🟡 **Implemented, not fully live-teste
 
 | Suite | Result |
 |---|---|
-| Backend `pytest` (runtime, social tools & adapters, tools, permissions, memory, free-model pool, API, security regressions) | **153 passed** on Python 3.12 with PostgreSQL 16 and real Chromium (148 passed, 5 skipped on 3.11 without those) |
+| Backend `pytest` (runtime, social tools & adapters, Autopilot, tools, permissions, memory, free-model pool, API, security regressions) | **192 passed** on Python 3.13 with PostgreSQL 16 and real Chromium |
 | Frontend type-check + `vitest` | **18 passed** |
-| End-to-end (Playwright: real dashboard + real API + a test-only scripted server speaking the OpenRouter protocol) | **15 passed** (incl. one-click publish, approved auto-publish at a time, account-connect checks, chat approval card, inbox triage, 360 px layout, safe markdown) |
+| End-to-end (Playwright: real dashboard + real API + a test-only scripted server speaking the OpenRouter protocol) | **16 passed** (incl. Autopilot campaign → research → writing → fact-check → batch approval, one-click publish, approved auto-publish at a time, account-connect checks, chat approval card, inbox triage, 360 px layout, safe markdown) |
 | `next build` | passed · `npm audit`: **0 vulnerabilities** · `pip-audit`: **0 known vulnerabilities** |
 | Secret scan (gitleaks) on the publishable tree | no leaks |
 | Live OpenRouter check (2026-10-16, from the owner's machine) | key valid (free tier, 50 free requests/day); **10 of 15** chat-capable free models answered with a correct tool call; 4 were temporarily rate-limited upstream (429); 2 are restricted to agentic harnesses (403, excluded) |
+
+## Autopilot (0.5.0, 2026-10-17)
+
+✅ Campaigns, research (RSS/Atom, Hacker News, Reddit; 🔑 web search with Tavily/Brave), scoring, SEO keywords and hashtags, writing (E.D.I.T.H.) and fact-checking (JOCASTA) in two free-model requests per story, quality gate, posting times / daily caps / spacing, trust levels with the 10-post unlock and veto downgrade, batch approval, cancel window, crisis / failure / engagement auto-pause, engagement learning, digest API, dashboard page. 30 tests in `services/api/tests/test_autopilot.py` (plus one on PostgreSQL) and one end-to-end test. An independent review before release found 3 high-severity issues: a pause, deletion or trust change during a run, or after posts were queued, did not stop those posts. It also found 7 medium/low ones: a malformed source could stop a run, re-creating a campaign or simulated posts counted toward the Full auto unlock, the fact-check accepted any truthy value, bare web addresses were not flagged, and long runs could delay due posts. All are fixed with regression tests. Guide: [AUTOPILOT.md](AUTOPILOT.md).
+
+Not included: Google Trends (no public API), images and video for Instagram/TikTok/YouTube, email or phone notifications (the digest is in the dashboard and the API).
 
 ## Security audit (2026-10-16)
 

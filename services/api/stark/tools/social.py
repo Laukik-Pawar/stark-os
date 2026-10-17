@@ -664,6 +664,7 @@ def summarize(item: dict[str, Any]) -> dict[str, Any]:
     out["check"] = {"verdict": (item.get("check") or {}).get("verdict"),
                     "issues": (item.get("check") or {}).get("issues", [])}
     out["review"] = item.get("review") or None
+    out["autopilot"] = item.get("autopilot") or None
     out["fingerprint"] = fingerprint(item)
     out["auto_publish"] = bool(item.get("auto_publish") and item.get("approved_fp") == out["fingerprint"])
     return out

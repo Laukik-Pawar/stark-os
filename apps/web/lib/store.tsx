@@ -125,6 +125,9 @@ export function StarkProvider({ conn, children, onAuthError }: { conn: Connectio
           case "mode":
             debounce("status", loadStatus, 50);
             break;
+          case "autopilot.alert":
+            notify("warn", `Autopilot · ${ev.data.campaign}: ${String(ev.data.message)}`.slice(0, 220));
+            break;
           case "usage":
             debounce("status", loadStatus, 2000);
             break;

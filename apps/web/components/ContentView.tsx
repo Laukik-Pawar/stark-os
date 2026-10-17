@@ -161,6 +161,7 @@ function PostCard({ item: it, account, onChange, talkTo }: { item: ContentItem; 
         <span className="chip">{STATUS_LABEL[it.status] || it.status}</span>
         {it.check?.verdict && <span className={`chip ${VERDICT[it.check.verdict] || ""}`}>check {it.check.verdict.toUpperCase()}</span>}
         {it.review?.verdict && <span className="chip">J.A.R.V.I.S.: {it.review.verdict}</span>}
+        {it.autopilot && <span className="chip !text-cyan-300" title={`From: ${it.autopilot.source_title}`}>Autopilot</span>}
         {it.simulated && <span className="chip !text-amber-300">{it.status === "published" ? "SIMULATED" : "simulated platform"}</span>}
         {it.auto_publish && it.status === "scheduled" && <span className="chip !text-emerald-300">auto-publish approved</span>}
         {it.paused && <span className="chip !text-red-300"><PauseCircle size={12} className="mr-1 inline" />paused</span>}

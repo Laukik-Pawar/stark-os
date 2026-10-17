@@ -166,7 +166,7 @@ test("no sideways page scroll on a 360px phone, even with long unbroken text", a
   await connect(page);
   await send(page, "Jocasta, summarise https://example.com/" + "a".repeat(180) + " for our audience");
   await expect(page.getByText(/JOCASTA acknowledges/)).toBeVisible({ timeout: 20_000 });
-  for (const view of ["Start", "Command", "Content", "Agents", "Tasks", "Approvals", "Memory", "Models", "Tools", "Activity", "Settings"]) {
+  for (const view of ["Start", "Command", "Content", "Autopilot", "Agents", "Tasks", "Approvals", "Memory", "Models", "Tools", "Activity", "Settings"]) {
     await page.getByRole("button", { name: view, exact: true }).first().click();
     await page.waitForTimeout(300);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -193,4 +193,54 @@ test("Start page explains the flow and shows what is left to set up", async ({ p
   await page.screenshot({ path: "e2e/screenshots/start.png", fullPage: true });
   await page.getByRole("button", { name: /Write a post/ }).click();
   await expect(page.getByLabel("Message")).toHaveValue(/EDITH, write a friendly Bluesky post about/);
+});
+
+test("Autopilot: create a campaign, it researches and writes, you approve the batch", async ({ page }) => {
+  await connect(page);
+  await page.getByRole("button", { name: "Autopilot", exact: true }).click();
+  await page.getByRole("button", { name: "Create your first campaign" }).click();
+  await page.getByLabel("Campaign name").fill("AI agents news");
+  await page.getByLabel("Topics (comma separated)").fill("AI agents, open source");
+  await page.getByLabel("SEO keywords (comma separated)").fill("ai agents, open source");
+  await page.getByLabel("Source type").selectOption("rss");
+  await page.getByLabel("Source", { exact: true }).fill("http://127.0.0.1:8799/feed.xml");
+  await page.getByLabel("Mastodon").uncheck();
+  await page.getByLabel("Posting times").fill("00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00");
+  await page.getByLabel("Time zone").fill("UTC");
+  await expect(page.getByLabel("Co-pilot")).toBeChecked(); // the safe default
+  await page.getByRole("button", { name: "Create campaign" }).click();
+  await expect(page.getByRole("heading", { name: "AI agents news" })).toBeVisible();
+  // an earlier test pulled the emergency stop: the page says so and Autopilot does not run until you resume
+  const halted = page.getByText("Autopilot does not run and nothing is posted", { exact: false });
+  if (await halted.isVisible().catch(() => false)) {
+    await expect(page.getByRole("button", { name: "Run now" })).toBeDisabled();
+    await page.getByRole("button", { name: "Content", exact: true }).click();
+    await page.getByRole("button", { name: "Resume" }).first().click();
+    await page.getByRole("button", { name: "Autopilot", exact: true }).click();
+    await page.getByRole("button", { name: "Open" }).first().click();
+    await expect(halted).toBeHidden();
+  }
+  await page.getByRole("button", { name: "Run now" }).click();
+  const post = page.getByTestId("autopilot-post").first();
+  await expect(post).toBeVisible({ timeout: 20_000 });
+  await expect(post.getByText("approval checks for AI agents", { exact: false })).toBeVisible();
+  await expect(post.getByText("#AiAgents", { exact: false })).toBeVisible(); // SEO hashtag added by STARK OS
+  // the test feed links over plain http, so the quality gate asks for a look instead of passing it
+  await expect(post.getByText("checks need a look")).toBeVisible();
+  await expect(post.getByText("Link is not HTTPS", { exact: false })).toBeVisible();
+  await expect(post.getByText("fact-checked")).toBeVisible();
+  await page.screenshot({ path: "e2e/screenshots/autopilot.png", fullPage: true });
+  await page.getByRole("button", { name: "Approve all" }).click();
+  await expect(page.getByText("1 post approved")).toBeVisible();
+  await page.getByRole("tab", { name: /Going out/ }).click();
+  await expect(page.getByTestId("autopilot-post").first()).toBeVisible();
+  // full auto stays locked until the campaign has a clean track record
+  await expect(page.getByRole("button", { name: /Full auto/ })).toBeDisabled();
+  // phone width: campaign page and the campaign form have no sideways scroll
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(362);
+  await page.getByRole("button", { name: "Settings" }).last().click();
+  await expect(page.getByText("How much to trust it")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(362);
 });

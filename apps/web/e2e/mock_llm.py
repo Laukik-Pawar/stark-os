@@ -42,7 +42,14 @@ def respond(body: dict) -> dict:
     last = json.loads(results[-1]["content"]) if results else None
 
     tool_names = json.dumps(body.get("tools", []))
-    if has_tools and "before i publish it" in low and n == 0:  # the model-pool ping request
+    if "## Autopilot writing task" in system:
+        platforms = [p.split(" = ")[0].strip() for p in user.split("character budgets: ", 1)[1].split("\n")[0].split(", ")]
+        posts = {p: "A new open source toolkit adds approval checks for AI agents, with 12 built-in rules." for p in platforms}
+        msg = {"role": "assistant", "content": json.dumps({"posts": posts})}
+    elif "## Autopilot fact-check task" in system:
+        posts = json.loads(user.split("Posts:\n", 1)[1].split("\n\n<<<SOURCE", 1)[0])
+        msg = {"role": "assistant", "content": json.dumps({"results": {p: {"supported": True, "problems": []} for p in posts}})}
+    elif has_tools and "before i publish it" in low and n == 0:  # the model-pool ping request
         msg = call("social__check", {"platform": "bluesky", "text": "Hello world"}, n)
     elif has_tools and "draft a launch post" in low and "social__draft" in tool_names:
         if n == 0:
@@ -123,6 +130,15 @@ FREE_MODEL_IDS = [
 ]
 
 
+FEED = ("<?xml version='1.0'?><rss version='2.0'><channel><title>Test news</title><item>"
+        "<title>Open source AI agents get a new safety toolkit</title>"
+        "<link>http://127.0.0.1:8799/news/agents-toolkit</link>"
+        "<description>The toolkit adds approval checks for AI agents, with 12 built-in rules.</description>"
+        "</item></channel></rss>")
+ARTICLE = ("<html><body><h1>Open source AI agents get a new safety toolkit</h1><p>The toolkit adds approval checks "
+           "for AI agents. It ships with 12 built-in rules.</p></body></html>")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # quiet
         pass
@@ -135,7 +151,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _text(self, status: int, body: str, ctype: str) -> None:
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", ctype)
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
+        # Autopilot research fixtures (a news feed and the article it links to)
+        if self.path == "/feed.xml":
+            self._text(200, FEED, "application/rss+xml")
+            return
+        if self.path == "/robots.txt":
+            self._text(404, "", "text/plain")
+            return
+        if self.path == "/news/agents-toolkit":
+            self._text(200, ARTICLE, "text/html")
+            return
         if self.path.endswith("/key"):
             self._send(200, {"data": {"label": "e2e", "is_free_tier": True,
                                       "free_model_daily_requests": {"limit": 50, "remaining": 49, "used": 1}}})

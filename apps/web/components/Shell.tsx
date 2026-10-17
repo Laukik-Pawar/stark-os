@@ -1,10 +1,11 @@
 "use client";
 
-import { Activity, Brain, CalendarClock, Cpu, Home, Gauge, LogOut, MessageSquare, Network, OctagonX, ScrollText, Settings, ShieldCheck, Users, Wrench, X } from "lucide-react";
+import { Activity, Brain, CalendarClock, Cpu, Home, Gauge, LogOut, MessageSquare, Network, OctagonX, Rocket, ScrollText, Settings, ShieldCheck, Users, Wrench, X } from "lucide-react";
 import { useState } from "react";
 import { useStark } from "@/lib/store";
 import { ActivityView } from "./ActivityView";
 import { ApprovalsView } from "./ApprovalsView";
+import { AutopilotView } from "./AutopilotView";
 import { CommandView } from "./CommandView";
 import { ContentView } from "./ContentView";
 import { HomeView } from "./HomeView";
@@ -18,12 +19,13 @@ import { ToolsView } from "./ToolsView";
 import { UsageView } from "./UsageView";
 import { AgentGlyph } from "./ui";
 
-export type View = "home" | "command" | "content" | "team" | "tasks" | "approvals" | "memory" | "models" | "tools" | "diagnostics" | "usage" | "activity" | "settings";
+export type View = "home" | "command" | "content" | "autopilot" | "team" | "tasks" | "approvals" | "memory" | "models" | "tools" | "diagnostics" | "usage" | "activity" | "settings";
 
 const NAV: { id: View; label: string; icon: React.ElementType }[] = [
   { id: "home", label: "Start", icon: Home },
   { id: "command", label: "Command", icon: MessageSquare },
   { id: "content", label: "Content", icon: CalendarClock },
+  { id: "autopilot", label: "Autopilot", icon: Rocket },
   { id: "team", label: "Agents", icon: Users },
   { id: "tasks", label: "Tasks", icon: Network },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
@@ -161,6 +163,7 @@ export function Shell({ onSignOut }: { onSignOut: () => void }) {
           {view === "command" && <CommandView agentId={focusAgent} setAgentId={setFocusAgent} openTask={openTask} prefill={prefill} />}
           {view === "home" && <HomeView talkTo={talkTo} go={setView} />}
           {view === "content" && <ContentView talkTo={talkTo} />}
+          {view === "autopilot" && <AutopilotView />}
           {view === "team" && <TeamView talkTo={talkTo} openTask={openTask} />}
           {view === "tasks" && <TasksView focus={focusTask} setFocus={setFocusTask} />}
           {view === "approvals" && <ApprovalsView openTask={openTask} />}

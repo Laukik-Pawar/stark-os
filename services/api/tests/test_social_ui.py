@@ -160,9 +160,20 @@ def test_upgrade_adds_new_columns_to_an_existing_database(tmp_path):
     db = Database(f"sqlite:///{path}")
     db.create_all()
     cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(content_items)")}
-    assert {"auto_publish", "approved_fp", "approved_at", "paused"} <= cols
+    assert {"auto_publish", "approved_fp", "approved_at", "paused", "autopilot"} <= cols
+    tables = {r[0] for r in sqlite3.connect(path).execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"campaigns", "research_items"} <= tables  # 0.5.0 Autopilot tables are created on upgrade
     with db.session() as s:
-        assert s.get(ContentItem, "cnt_1").auto_publish in (False, 0)
+        old = s.get(ContentItem, "cnt_1")
+        assert old.auto_publish in (False, 0) and old.autopilot is None
+    assert social.summarize(to_dict_row(db))["autopilot"] is None
+
+
+def to_dict_row(db):
+    from stark.core.db import to_dict
+
+    with db.session() as s:
+        return to_dict(s.get(ContentItem, "cnt_1"))
 
 
 def test_publish_refuses_when_the_page_expected_a_simulation_but_the_account_is_live(client):

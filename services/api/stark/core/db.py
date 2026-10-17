@@ -206,6 +206,64 @@ class ContentItem(Base):
     auto_publish: Mapped[bool] = mapped_column(Boolean, default=False)
     approved_fp: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Autopilot metadata (campaign, source story, quality gate, fact-check, keywords, engagement). Empty for
+    # items written by hand or by an agent.
+    autopilot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, default=None)
+
+
+class Campaign(Base):
+    """An Autopilot campaign: what to research and post about, where, when, and how much to trust it."""
+
+    __tablename__ = "campaigns"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("cmp"))
+    name: Mapped[str] = mapped_column(String(120), unique=True)  # = ContentItem.campaign; fixed after creation
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    topics: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    keywords: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    avoid_terms: Mapped[list[Any]] = mapped_column(JSON, default=list)  # never post these (brand safety)
+    audience: Mapped[str] = mapped_column(Text, default="")
+    tone: Mapped[str] = mapped_column(Text, default="")
+    platforms: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    sources: Mapped[list[Any]] = mapped_column(JSON, default=list)  # [{type: rss|hn|reddit|search, value}]
+    post_times: Mapped[list[Any]] = mapped_column(JSON, default=list)  # ["09:00", "17:30"] in `timezone`
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    daily_cap: Mapped[int] = mapped_column(Integer, default=3)  # posts per platform per day
+    min_gap_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    trust_level: Mapped[str] = mapped_column(String(16), default="copilot")  # copilot | veto | auto
+    veto_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    link_policy: Mapped[str] = mapped_column(String(16), default="always")  # always | never
+    fact_check: Mapped[bool] = mapped_column(Boolean, default=True)
+    research_every_h: Mapped[float] = mapped_column(Float, default=6.0)
+    max_new_per_run: Mapped[int] = mapped_column(Integer, default=2)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # keywords, history, veto/crisis marks
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_metrics_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResearchItem(Base):
+    """A story Autopilot found for a campaign (RSS, Hacker News, Reddit, web search)."""
+
+    __tablename__ = "research_items"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("res"))
+    campaign_id: Mapped[str] = mapped_column(String(40), index=True)
+    source: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    url_hash: Mapped[str] = mapped_column(String(64), index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    signals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    keywords: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="new")  # new | used | skipped
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    used_for: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Setting(Base):

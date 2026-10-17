@@ -63,3 +63,34 @@ async def test_social_queue_on_postgres(settings):
     assert out.ok and out.simulated
     q = social.list_queue(k, "published")
     assert q[0]["media"][0]["alt_text"] == "STARK logo" and q[0]["check"]["verdict"] == "pass"
+
+
+def test_autopilot_on_postgres(settings):
+    """Campaign → research → writing → fact-check → batch approval, on PostgreSQL."""
+    from fastapi.testclient import TestClient
+
+    from stark.main import create_app
+
+    from .conftest import ScriptedProvider
+    from .test_autopilot import EVERY_3H, STORY, Brain, rss, web
+
+    db = Database(PG)
+    with db.engine.begin() as conn:
+        conn.execute(sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+    settings.database_url = PG
+    settings.scheduler_interval_s = 3600
+    settings.allow_private_fetch = True
+    app = create_app(settings, {"openrouter": ScriptedProvider(Brain())})
+    with TestClient(app) as c:
+        c.headers["authorization"] = f"Bearer {settings.api_token}"
+        c.app.state.kernel.autopilot.transport = web(rss([STORY]))
+        cid = c.post("/api/autopilot/campaigns", json={
+            "name": "pg", "topics": ["AI agents"], "keywords": ["ai agents"], "platforms": ["bluesky", "mastodon"],
+            "sources": [{"type": "rss", "value": "https://feeds.example.com/feed.xml"}], "post_times": EVERY_3H}).json()["id"]
+        report = c.post(f"/api/autopilot/campaigns/{cid}/run").json()
+        assert report["awaiting"] == 2, report
+        items = c.get(f"/api/autopilot/campaigns/{cid}").json()["items"]
+        r = c.post("/api/autopilot/approve", json={"items": [{"id": i["id"], "fingerprint": i["fingerprint"]}
+                                                             for i in items]}).json()
+        assert r["approved"] == 2
+        assert c.get("/api/autopilot/digest").json()["campaigns"][0]["going_out"]

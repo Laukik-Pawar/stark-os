@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Shahrukhalid/stark-os/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE) ![Free models](https://img.shields.io/badge/models-free%20OpenRouter-34d399) [![Website](https://img.shields.io/badge/website-stark--os-22d3ee)](https://shahrukhalid.github.io/stark-os/)
 
-A free, self-hosted **AI social media manager** that works like a real team: seven AI agents, each with its own brain, role and limits, plan campaigns, write posts for Bluesky, Mastodon, X, LinkedIn and more, run your community inbox, research trends, stress-test content for backlash and schedule it. Nothing is published **until you approve each post**. Think of it as an open-source, AI-first alternative to paid social media schedulers.
+A free, self-hosted **AI social media manager** that works like a real team: seven AI agents, each with its own brain, role and limits, plan campaigns, write posts for Bluesky, Mastodon, X, LinkedIn and more, run your community inbox, research trends, stress-test content for backlash and schedule it. **Autopilot** runs the whole loop on its own (research, SEO keywords and hashtags, writing, fact-checking, scheduling, learning from engagement), and **you decide how much it may post without asking**. Think of it as an open-source, AI-first alternative to paid social media schedulers.
 
 **Website:** https://shahrukhalid.github.io/stark-os/
 
@@ -17,7 +17,8 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 ## Why STARK OS?
 
 - **Free.** No subscription and no paid AI: it runs on free OpenRouter models, with automatic failover when one is busy.
-- **You stay in charge.** Agents draft, check and schedule; nothing is posted until you approve that exact text.
+- **Set and forget, safely.** Autopilot campaigns research, write, fact-check and schedule by themselves. Start in Co-pilot (approve a whole batch in one click), move to "Autopilot with veto" when you trust it.
+- **You stay in charge.** Every post is approved by you, or by a trust level you chose for a campaign, and sensitive topics always wait for you.
 - **Private.** Everything runs on your computer. Your social logins never leave it.
 - **A real team, not one chatbot.** Seven agents with separate jobs check each other's work, including a red-team agent whose only job is to find how a post could backfire.
 - **Hackable.** Each agent is a small TOML file plus a prompt. Add an agent, a tool or a platform in an afternoon.
@@ -38,10 +39,11 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 
 ## What works today
 
+- **Autopilot campaigns** ([guide](docs/AUTOPILOT.md)): automatic research from RSS feeds, Hacker News, Reddit and web search; relevance and freshness scoring; SEO keywords and hashtags ranked by real engagement; one free-model request writes every platform's version and a second one fact-checks them against the source; a quality gate (policy, invented numbers, extra links, duplicates, sensitive topics); posting times, daily caps and spacing; trust levels **Co-pilot → Autopilot with veto → Full auto** (unlocked after 10 clean posts); auto-pause on a crisis in your mentions, repeated failures or an engagement collapse.
 - **Content queue**: drafts, threads, replies and video posts for Bluesky, Mastodon, X, Threads, LinkedIn, Instagram, Facebook, TikTok and YouTube, with a calendar, statuses and a dashboard view.
 - **Policy check on every draft** (code, not a prompt): platform length limits (X counts links as 23), leaked keys, personal data, missing #ad disclosure, giveaway rules, engagement bait, bought engagement, hashtag limits, insecure or shortened links, missing alt text, all-caps.
 - **Real publishing** on **Bluesky** and **Mastodon** (both free APIs), including threads and replies. Other platforms need paid or reviewed API access, so publishing there is a clearly labelled **SIMULATION**.
-- **You approve every post**: one click to publish, or schedule it and tick *Publish automatically* to approve that exact text for that time. Edits cancel the approval. Agents can't publish on their own.
+- **You approve every post** (or let an Autopilot trust level you chose do it): one click to publish, or schedule it and tick *Publish automatically* to approve that exact text for that time. Edits cancel the approval. Agents can't publish on their own.
 - **Connect accounts in the dashboard** (Bluesky app password, Mastodon token), stored only on your computer.
 - **Start page** with how it works, a setup checklist and one-click starting points.
 - **Inbox** with triage (escalate, abuse, spam, complaint, question, praise), from real Bluesky/Mastodon notifications or labelled sample mentions.
@@ -98,7 +100,7 @@ Ports 3000 or 8000 already used by another project? Add `STARK_WEB_PORT=3737` an
 | ![Start page: how it works and setup checklist](docs/screenshots/start.png) | ![Content: your posts and accounts](docs/screenshots/content.png) |
 | ![Approval before publishing](docs/screenshots/approval.png) | ![Free models, live status](docs/screenshots/models.png) |
 | ![The seven agents, each with its own brain](docs/screenshots/agents.png) | ![Team review with visible collaboration](docs/screenshots/collaboration.png) |
-| ![Command: talk to any agent](docs/screenshots/command.png) | |
+| ![Command: talk to any agent](docs/screenshots/command.png) | ![Autopilot: research, write, fact-check, approve in one click](docs/screenshots/autopilot.png) |
 
 ## Tests
 
@@ -118,13 +120,19 @@ docs/                   ARCHITECTURE, DECISIONS, IMPLEMENTATION_STATUS, TASKS
 
 ## Rules the platform enforces
 
-- Every publish needs your approval; only D.U.M.-E. can publish; failing checks and J.A.R.V.I.S. blocks stop a publish.
+- Every publish needs your approval, or an Autopilot trust level you set (sensitive topics and failed checks always wait for you); only D.U.M.-E. and approved schedules can publish; failing checks and J.A.R.V.I.S. blocks stop a publish.
 - No impersonation, fake accounts, bought or automated engagement, harassment, or profiling of private individuals. Paid partnerships are disclosed. Respect each platform's terms.
 - Messages from strangers (mentions, DMs, web pages) are treated as untrusted data, never instructions.
 - Secrets live only in `.env` (git-ignored) and are redacted from logs. The API binds to 127.0.0.1 and requires a random token.
 - Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ## FAQ
+
+**Can it post automatically, without me?**
+Yes, if you want it to. Create an Autopilot campaign and set it to *Autopilot with veto*: posts that pass every check go out after a waiting period in which you can cancel them. *Full auto* unlocks after 10 clean posts. Sensitive news always waits for you.
+
+**Does it do SEO and hashtags?**
+Yes. Autopilot scores stories against your keywords, adds hashtags that fit each platform's limit, and ranks keywords by the likes, reposts and replies they actually earned.
 
 **Is there a free, open-source AI social media manager?**
 Yes: STARK OS is MIT licensed, runs on your own computer and uses free OpenRouter models. It never calls a paid model unless you turn that on.

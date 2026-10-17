@@ -223,6 +223,113 @@ export interface ContentItem {
   due: boolean;
   fingerprint: string;
   auto_publish: boolean;
+  autopilot?: AutopilotMeta | null;
+}
+
+export interface GateReason {
+  level: "reject" | "review";
+  code: string;
+  message: string;
+}
+
+export interface AutopilotMeta {
+  campaign_id: string;
+  research_id: string;
+  source_url: string;
+  source_title: string;
+  source: string;
+  story_score: number;
+  keywords: string[];
+  hashtags: string[];
+  gate: { verdict: "pass" | "review" | "reject"; score: number; reasons: GateReason[] };
+  fact_check: { supported: boolean; problems: string[] } | null;
+  trust: TrustLevel;
+  slot: string;
+  approved_by?: string;
+  veto_until?: string;
+  needs_you?: string[];
+  engagement?: Record<string, number>;
+  engagement_score?: number;
+}
+
+export type TrustLevel = "copilot" | "veto" | "auto";
+
+export interface CampaignSource {
+  type: "rss" | "hn" | "reddit" | "search";
+  value: string;
+}
+
+export interface RunReport {
+  at: string;
+  campaign: string;
+  researched: number;
+  new_stories: number;
+  drafted: number;
+  scheduled: number;
+  awaiting: number;
+  rejected: number;
+  errors: string[];
+  skipped?: string;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  enabled: boolean;
+  paused: boolean;
+  pause_reason: string | null;
+  topics: string[];
+  keywords: string[];
+  avoid_terms: string[];
+  audience: string;
+  tone: string;
+  platforms: string[];
+  sources: CampaignSource[];
+  post_times: string[];
+  timezone: string;
+  daily_cap: number;
+  min_gap_minutes: number;
+  trust_level: TrustLevel;
+  veto_minutes: number;
+  link_policy: "always" | "never";
+  fact_check: boolean;
+  research_every_h: number;
+  max_new_per_run: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  streak: number;
+  auto_unlocked: boolean;
+  auto_unlock_needs: number;
+  history: RunReport[];
+  counts: { awaiting: number; going_out: number; published_24h: number; rejected_24h: number };
+}
+
+export interface ResearchStory {
+  id: string;
+  source: string;
+  title: string;
+  url: string;
+  summary: string;
+  published_at: string | null;
+  score: number;
+  keywords: string[];
+  status: "new" | "used" | "skipped";
+  note: string | null;
+  created_at: string;
+}
+
+export interface KeywordRow {
+  keyword: string;
+  hashtag: string | null;
+  posts: number;
+  measured: number;
+  avg_engagement: number | null;
+}
+
+export interface CampaignDetail extends Campaign {
+  keywords_table: KeywordRow[];
+  research: ResearchStory[];
+  items: ContentItem[];
 }
 
 export interface SocialAccount {

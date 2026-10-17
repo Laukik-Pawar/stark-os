@@ -36,6 +36,7 @@ To disconnect, click **Disconnect** (you can also revoke the app password or tok
 - If STARK OS was switched off and a post is more than 6 hours late, it is **not** posted late; it asks you again.
 - **E-STOP** (top right) stops everything and pauses the whole queue until you press **Resume** in Content.
 - Agents never publish on their own. D.U.M.-E. can publish from chat, but every time you see an approval card with the exact text.
+- **Autopilot campaigns** (Autopilot page) research and write posts every few hours. In **Co-pilot** (the default) they wait for you: approve them in one click. In **Autopilot with veto** posts that pass every check go out after a cancel window. Sensitive topics always wait for you, and a campaign pauses itself on a crisis in your mentions, repeated failures or an engagement collapse. Full guide: [AUTOPILOT.md](AUTOPILOT.md).
 
 ## Tips
 

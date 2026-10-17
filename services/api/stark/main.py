@@ -40,6 +40,8 @@ from .core.observability import configure_logging, log
 from .core.permissions import Mode
 from .core.runtime import TERMINAL, Kernel
 from .providers import ModelProvider
+from . import autopilot as ap
+from .core.db import Campaign
 from .tools import build_registry
 from .tools import social as social_tools
 
@@ -141,6 +143,49 @@ class ScheduleIn(ItemActionIn):
     auto: bool = False
 
 
+class SourceIn(BaseModel):
+    type: Literal["rss", "hn", "reddit", "search"]
+    value: str = Field(..., min_length=1, max_length=500)
+
+
+class CampaignPatch(BaseModel):
+    enabled: bool | None = None
+    topics: list[str] | None = Field(None, max_length=30)
+    keywords: list[str] | None = Field(None, max_length=30)
+    avoid_terms: list[str] | None = Field(None, max_length=30)
+    audience: str | None = Field(None, max_length=500)
+    tone: str | None = Field(None, max_length=300)
+    platforms: list[str] | None = Field(None, max_length=6)
+    sources: list[SourceIn] | None = Field(None, max_length=20)
+    post_times: list[str] | None = Field(None, max_length=12)
+    timezone: str | None = Field(None, max_length=64)
+    daily_cap: int | None = Field(None, ge=1, le=10)
+    min_gap_minutes: int | None = Field(None, ge=15, le=1440)
+    trust_level: Literal["copilot", "veto", "auto"] | None = None
+    veto_minutes: int | None = Field(None, ge=10, le=1440)
+    link_policy: Literal["always", "never"] | None = None
+    fact_check: bool | None = None
+    research_every_h: float | None = Field(None, ge=1, le=48)
+    max_new_per_run: int | None = Field(None, ge=1, le=5)
+
+
+class CampaignIn(CampaignPatch):
+    name: str = Field(..., min_length=2, max_length=120)
+    platforms: list[str] = Field(..., min_length=1, max_length=6)
+    sources: list[SourceIn] = Field(..., min_length=1, max_length=20)
+    post_times: list[str] = Field(default_factory=lambda: ["09:00", "13:00", "18:00"], min_length=1, max_length=12)
+    timezone: str = Field("UTC", max_length=64)
+
+
+class ApproveItem(BaseModel):
+    id: str = Field(..., max_length=40)
+    fingerprint: str = Field(..., min_length=64, max_length=64)
+
+
+class ApproveIn(BaseModel):
+    items: list[ApproveItem] = Field(..., min_length=1, max_length=50)
+
+
 class GrantIn(BaseModel):
     agent_id: str
     tool_id: str
@@ -171,6 +216,7 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
         await holder["k"].router.prepare()
         log.info("STARK OS API ready", extra={"ctx": {"agents": holder["k"].registry.ids(),
                                                       "providers": holder["k"].router.configured_providers()}})
+        holder["k"].autopilot = ap.Autopilot(holder["k"], holder["k"].tools.get("social.publish").social, settings)
         scheduler = asyncio.create_task(_scheduler_loop(holder["k"]))
         yield
         scheduler.cancel()
@@ -178,14 +224,26 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
             job.cancel()
 
     async def _scheduler_loop(k: Kernel) -> None:
-        """Publishes posts you approved for a time ("publish automatically"). Nothing else runs unattended."""
+        """Publishes posts approved for a time (by you, or by an Autopilot campaign you set to veto/auto)
+        and runs due Autopilot campaigns."""
         social = k.tools.get("social.publish").social
-        while True:
-            await asyncio.sleep(max(1.0, settings.scheduler_interval_s))
-            try:
-                await social_tools.run_scheduler_once(k, social, settings)
-            except Exception as exc:  # never let the loop die
-                log.warning(f"scheduler error: {exc}")
+        autopilot_job: asyncio.Task | None = None
+        try:
+            while True:
+                await asyncio.sleep(max(1.0, settings.scheduler_interval_s))
+                try:
+                    await social_tools.run_scheduler_once(k, social, settings)
+                except Exception as exc:  # never let the loop die
+                    log.warning(f"scheduler error: {exc}")
+                # Autopilot runs (research + model calls) take minutes: run them beside the publisher, so a long
+                # run never delays a post that is due. At most one tick at a time.
+                if autopilot_job is None or autopilot_job.done():
+                    if autopilot_job is not None and not autopilot_job.cancelled() and autopilot_job.exception():
+                        log.warning(f"autopilot error: {autopilot_job.exception()}")
+                    autopilot_job = asyncio.create_task(k.autopilot.tick())
+        finally:
+            if autopilot_job is not None:
+                autopilot_job.cancel()
 
     app = FastAPI(title="STARK OS API", version=__version__, lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=[settings.web_origin], allow_methods=["*"],
@@ -418,7 +476,10 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
             raise HTTPException(404, "no such content item")
         if item["status"] in ("published", "publishing"):
             raise HTTPException(409, "Already published: delete it on the platform itself.")
-        social_tools._update(k, item_id, status="rejected", auto_publish=False, approved_fp=None)
+        if item.get("autopilot"):
+            _ap(k).veto(item_id)  # discarding an Autopilot post is a veto: it counts against the campaign's trust
+        else:
+            social_tools._update(k, item_id, status="rejected", auto_publish=False, approved_fp=None)
         k.obs.audit("user", "social.discard", "ok", target=item_id)
         return {"ok": True}
 
@@ -437,6 +498,144 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
             raise HTTPException(400, "unknown platform")
         return {"items": social_tools.list_queue(k, status, platform, None, max(1, min(limit, 500))),
                 "paused": social_tools.queue_paused(k)}
+
+    # ---------------------------------------------------------- autopilot
+    def _ap(k: Kernel) -> ap.Autopilot:
+        return k.autopilot
+
+    def _campaign_or_404(k: Kernel, campaign_id: str) -> dict:
+        c = _ap(k).get(campaign_id)
+        if c is None:
+            raise HTTPException(404, "no such campaign")
+        return c
+
+    def _clean(body: BaseModel, creating: bool) -> dict:
+        data = body.model_dump(exclude_none=True)
+        if "sources" in data:
+            data["sources"] = [dict(s) for s in data["sources"]]
+        try:
+            return ap.validate_campaign(data, creating=creating)
+        except (ap.AutopilotError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.get("/api/autopilot/campaigns", dependencies=[api])
+    async def campaigns(k: Kernel = Depends(kernel)):
+        return {"campaigns": [_ap(k).describe(c) for c in _ap(k).all()], "auto_unlock": ap.AUTO_UNLOCK,
+                "queue_paused": social_tools.queue_paused(k), "emergency_stop": k.perms.emergency_stop,
+                "can_write": bool(k.router.configured_providers()),
+                "search_configured": bool(settings.tavily_api_key or settings.brave_api_key)}
+
+    @app.post("/api/autopilot/campaigns", dependencies=[api])
+    async def create_campaign(body: CampaignIn, k: Kernel = Depends(kernel)):
+        data = _clean(body, True)
+        if data.get("trust_level") == "auto":
+            raise HTTPException(409, f"Full auto unlocks after {ap.AUTO_UNLOCK} clean posts. Start with co-pilot "
+                                     "or veto.")
+        with k.db.session() as s:
+            if s.scalars(select(Campaign).where(Campaign.name == data["name"])).first() is not None:
+                raise HTTPException(409, "A campaign with that name already exists.")
+            row = Campaign(**data, next_run_at=datetime.now(timezone.utc))
+            s.add(row)
+            s.flush()
+            out = to_dict(row)
+        k.obs.audit("user", "autopilot.create", "ok", target=out["name"], detail={"trust": out["trust_level"]})
+        return _ap(k).describe(out)
+
+    @app.get("/api/autopilot/campaigns/{campaign_id}", dependencies=[api])
+    async def campaign(campaign_id: str, k: Kernel = Depends(kernel)):
+        c = _campaign_or_404(k, campaign_id)
+        out = _ap(k).describe(c)
+        out["keywords_table"] = _ap(k).keyword_table(c)
+        out["research"] = _ap(k).research_list(campaign_id)
+        out["items"] = social_tools.list_queue(k, "all", None, c["name"], 100)
+        return out
+
+    @app.patch("/api/autopilot/campaigns/{campaign_id}", dependencies=[api])
+    async def patch_campaign(campaign_id: str, body: CampaignPatch, k: Kernel = Depends(kernel)):
+        c = _campaign_or_404(k, campaign_id)
+        data = _clean(body, False)
+        if data.get("trust_level") == "auto" and c["trust_level"] != "auto" and _ap(k).streak(c) < ap.AUTO_UNLOCK:
+            raise HTTPException(409, f"Full auto unlocks after {ap.AUTO_UNLOCK} clean Autopilot posts in a row "
+                                     f"(this campaign has {_ap(k).streak(c)}).")
+        if any(key in data for key in ("sources", "topics", "keywords", "post_times", "timezone", "platforms")):
+            data["next_run_at"] = datetime.now(timezone.utc)  # use the new settings on the next tick
+        rank = {"copilot": 0, "veto": 1, "auto": 2}
+        lowered = "trust_level" in data and rank[data["trust_level"]] < rank.get(c["trust_level"], 0)
+        out = _ap(k).save(campaign_id, **data)
+        if lowered or data.get("enabled") is False:
+            # less trust (or switched off) applies to posts already queued, not just to future ones
+            _ap(k).revoke_auto(out, "You lowered this campaign's trust level or switched it off; this post now waits "
+                                    "for you.")
+        k.obs.audit("user", "autopilot.update", "ok", target=c["name"], detail={"fields": sorted(data)})
+        return _ap(k).describe(out)
+
+    @app.delete("/api/autopilot/campaigns/{campaign_id}", dependencies=[api])
+    async def delete_campaign(campaign_id: str, k: Kernel = Depends(kernel)):
+        c = _campaign_or_404(k, campaign_id)
+        pending = social_tools.list_queue(k, "scheduled", None, c["name"], 500)
+        for i in pending:
+            if i.get("autopilot"):
+                social_tools._update(k, i["id"], status="rejected", auto_publish=False, approved_fp=None,
+                                     error="Campaign deleted.")
+        with k.db.session() as s:
+            from .core.db import ResearchItem
+
+            for r in s.scalars(select(ResearchItem).where(ResearchItem.campaign_id == campaign_id)).all():
+                s.delete(r)
+            row = s.get(Campaign, campaign_id)
+            if row is not None:
+                s.delete(row)
+        k.obs.audit("user", "autopilot.delete", "ok", target=c["name"])
+        return {"deleted": True, "cancelled_posts": sum(1 for i in pending if i.get("autopilot"))}
+
+    @app.post("/api/autopilot/campaigns/{campaign_id}/run", dependencies=[api])
+    async def run_campaign(campaign_id: str, k: Kernel = Depends(kernel)):
+        c = _campaign_or_404(k, campaign_id)
+        if k.perms.emergency_stop:
+            raise HTTPException(409, "Emergency stop is engaged.")
+        if c["paused"]:
+            raise HTTPException(409, "This campaign is paused. Resume it first.")
+        if social_tools.queue_paused(k):
+            raise HTTPException(409, "The content queue is paused (emergency stop or fire suppression). Resume it "
+                                     "on the Content page first.")
+        k.obs.audit("user", "autopilot.run_now", "ok", target=c["name"])
+        return await _ap(k).run(campaign_id)
+
+    @app.post("/api/autopilot/campaigns/{campaign_id}/pause", dependencies=[api])
+    async def pause_campaign(campaign_id: str, paused: bool = True, k: Kernel = Depends(kernel)):
+        c = _campaign_or_404(k, campaign_id)
+        out = _ap(k).pause(c, "Paused by you.", actor="user") if paused else _ap(k).resume(c)
+        return _ap(k).describe(out)
+
+    @app.post("/api/autopilot/approve", dependencies=[api])
+    async def approve_posts(body: ApproveIn, k: Kernel = Depends(kernel)):
+        """Your click on the posts you saw is the approval (batch). Each must still match what you saw."""
+        if k.perms.emergency_stop:
+            raise HTTPException(409, "Emergency stop is engaged.")
+        results = []
+        for it in body.items:
+            try:
+                data = _ap(k).approve(it.id, it.fingerprint)
+                results.append({"id": it.id, "ok": True, "scheduled_for": data["scheduled_for"]})
+                k.obs.audit("user", "autopilot.approve", "ok", target=it.id)
+            except (ap.AutopilotError, KeyError) as exc:
+                results.append({"id": it.id, "ok": False, "error": str(exc).strip("'\"")})
+        return {"results": results, "approved": sum(r["ok"] for r in results)}
+
+    @app.post("/api/autopilot/items/{item_id}/veto", dependencies=[api])
+    async def veto_post(item_id: str, k: Kernel = Depends(kernel)):
+        try:
+            _ap(k).veto(item_id)
+        except ap.AutopilotError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except KeyError:
+            raise HTTPException(404, "no such content item") from None
+        k.obs.audit("user", "autopilot.veto", "ok", target=item_id)
+        return {"ok": True}
+
+    @app.get("/api/autopilot/digest", dependencies=[api])
+    async def digest(hours: int = Query(24, ge=1, le=168), k: Kernel = Depends(kernel)):
+        return _ap(k).digest(hours)
 
     # ---------------------------------------------------------- agents
     def _metrics(k: Kernel) -> dict[str, dict[str, Any]]:
