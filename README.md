@@ -55,7 +55,7 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 
 New here? Read the **[user guide](docs/USER_GUIDE.md)**. Exact status: **[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)**.
 
-## Quick start (macOS / Linux)
+## Quick start (macOS / Linux / Windows)
 
 Requirements: Python 3.11+, Node.js 20+, and a free [OpenRouter key](https://openrouter.ai/keys).
 
@@ -79,6 +79,18 @@ make dev          # API on 127.0.0.1:8000, dashboard on http://localhost:3000
 ```
 
 Open http://localhost:3000 and paste the `STARK_API_TOKEN` from `.env`.
+
+### Windows
+
+Requirements: Python 3.11+ from [python.org](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH"), Node.js 20+ LTS, and Git. In PowerShell:
+
+```powershell
+git clone https://github.com/Shahrukhalid/stark-os.git; cd stark-os
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # same as make setup
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1     # same as make dev; Ctrl+C stops both
+```
+
+Then edit `.env` as above. CI runs both scripts on Windows Server 2022 on every change.
 
 Ports 3000 or 8000 already used by another project? Add `STARK_WEB_PORT=3737` and `STARK_PORT=8737` (any free ports) to `.env`; `make dev` checks that the ports are free and prints the address to open.
 

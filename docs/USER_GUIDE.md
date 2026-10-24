@@ -32,7 +32,7 @@ To disconnect, click **Disconnect** (you can also revoke the app password or tok
 
 ## Automation: what runs on its own
 
-- **Approved scheduled posts** go out at their time, automatically, while STARK OS is running (`make dev`). If you, or an agent, edit a post after approving it, it won't go out until you approve the new text.
+- **Approved scheduled posts** go out at their time, automatically, while STARK OS is running (`make dev`, or `scripts\dev.ps1` on Windows). If you, or an agent, edit a post after approving it, it won't go out until you approve the new text.
 - If STARK OS was switched off and a post is more than 6 hours late, it is **not** posted late; it asks you again.
 - **E-STOP** (top right) stops everything and pauses the whole queue until you press **Resume** in Content.
 - Agents never publish on their own. D.U.M.-E. can publish from chat, but every time you see an approval card with the exact text.
@@ -49,7 +49,7 @@ To disconnect, click **Disconnect** (you can also revoke the app password or tok
 
 | Problem | Fix |
 |---|---|
-| "Cannot reach the API" on the login screen | The background part isn't running. Run `make dev` and wait for "STARK OS ready". |
+| "Cannot reach the API" on the login screen | The background part isn't running. Run `make dev` (Windows: `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1`) and wait for "STARK OS ready". |
 | Port already in use | Set `STARK_WEB_PORT` / `STARK_PORT` in `.env` to free ports. |
 | Bluesky connect fails | Check the handle (e.g. `name.bsky.social`) and create a fresh app password. |
 | A scheduled post didn't go out | STARK OS must be running at that time; check the post's message in Content. |

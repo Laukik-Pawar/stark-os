@@ -82,7 +82,9 @@ You are mute: you answer with storyboards, not speeches. Use this structure:
 ### Thumbnail / cover brief
 ### Alt text for every image
 Save captions or video posts with `social__draft` (kind=video, media = briefs with alt_text). STARK OS does
-not generate or upload images or video: you write the brief, the user creates the file.
+not generate images or video: you write the brief, the user creates the file. When the user has put a finished
+image in the brand folder, set the media item's `file` (e.g. brand/launch.png) and its alt_text: it is then
+uploaded with the post on Bluesky and Mastodon (PNG/JPEG/GIF/WebP, up to 4, 1 MB each on Bluesky).
 """,
 }
 

@@ -28,6 +28,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Literal
 
 import httpx
+try:  # grapheme clusters (\X) need the `regex` package; fall back to an approximation without it
+    import regex as _uregex
+except ImportError:  # pragma: no cover - regex is a declared dependency
+    _uregex = None
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
@@ -37,7 +41,7 @@ from .security import SECRET_RULES
 
 Platform = Literal["bluesky", "mastodon", "x", "threads", "linkedin", "instagram", "facebook", "tiktok", "youtube"]
 
-# limit = characters per post (Bluesky counts graphemes; code points are used as a close approximation).
+# limit = characters per post (Bluesky counts grapheme clusters, see grapheme_len).
 PLATFORMS: dict[str, dict[str, Any]] = {
     "bluesky": {"name": "Bluesky", "limit": 300, "hashtags": 3, "adapter": "AT Protocol (free)"},
     "mastodon": {"name": "Mastodon", "limit": 500, "hashtags": 5, "adapter": "Mastodon API (free)"},
@@ -75,9 +79,18 @@ GIVEAWAY_RULES = ("rules", "terms", "no purchase necessary", "t&c", "t&cs", "eli
 
 
 def grapheme_len(text: str) -> int:
-    """Approximate count of user-perceived characters (what Bluesky's 300 limit counts) without extra
-    dependencies: combining marks, variation selectors, skin-tone modifiers, emoji tag characters and
-    zero-width-joined sequences count once, and a flag (two regional indicators) counts once."""
+    """User-perceived characters (extended grapheme clusters, Unicode UAX #29), which is what Bluesky's
+    300-character limit counts: an emoji ZWJ sequence, a flag, a skin-tone emoji or a letter with
+    combining accents each count once."""
+    if _uregex is not None:
+        return len(_uregex.findall(r"\X", text))
+    return _approx_grapheme_len(text)
+
+
+def _approx_grapheme_len(text: str) -> int:
+    """Dependency-free approximation used only if `regex` is missing: combining marks, variation selectors,
+    skin-tone modifiers, emoji tag characters and zero-width-joined sequences count once, and a flag
+    (two regional indicators) counts once."""
     count = 0
     joined = False
     regional = False
@@ -100,6 +113,90 @@ def grapheme_len(text: str) -> int:
             regional = False
         count += 1
     return count
+
+
+# ------------------------------------------------------------------ media files (real image upload)
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+               ".webp": "image/webp"}
+# Per-platform upload limits: Bluesky rejects image blobs over 1,000,000 bytes; Mastodon's default image
+# limit is 16 MB. Both allow four images per post.
+MEDIA_LIMITS = {"bluesky": {"max_files": 4, "max_bytes": 1_000_000},
+                "mastodon": {"max_files": 4, "max_bytes": 16 * 1024 * 1024}}
+MAX_MEDIA_BYTES = max(v["max_bytes"] for v in MEDIA_LIMITS.values())
+MASTODON_MEDIA_POLL_S = 1.0
+
+
+class MediaFileError(ValueError):
+    pass
+
+
+def _sniff_image(data: bytes) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def load_media_file(settings, path: str) -> tuple[dict[str, Any], bytes]:
+    """Read an image the owner put in the workspace (brand/sandbox folder). Only image files inside the
+    authorised workspace roots, never credential-looking files, never larger than the biggest platform limit,
+    and the bytes must really be the image type the extension claims."""
+    from .filesystem import PathError, is_sensitive, resolve_in_roots
+
+    try:
+        resolved = resolve_in_roots(path, settings.workspace_roots)
+    except PathError as exc:
+        raise MediaFileError(str(exc)) from None
+    if is_sensitive(resolved):
+        raise MediaFileError(f"{path} looks like a credential file and can't be attached")
+    mime = IMAGE_TYPES.get(resolved.suffix.lower())
+    if mime is None:
+        raise MediaFileError(f"{path}: only PNG, JPEG, GIF and WebP images can be attached")
+    if not resolved.is_file():
+        raise MediaFileError(f"{path} was not found in the workspace")
+    size = resolved.stat().st_size
+    if size > MAX_MEDIA_BYTES:
+        raise MediaFileError(f"{path} is {size / 1_048_576:.1f} MB; the largest allowed image is 16 MB")
+    data = resolved.read_bytes()
+    if _sniff_image(data) != mime:
+        raise MediaFileError(f"{path} is not a valid {mime.split('/')[1].upper()} image")
+    return {"file": path, "mime": mime, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}, data
+
+
+def describe_media(settings, media: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach type, size and a content hash to every media item that names a file, so an approval covers
+    the exact image bytes (the hash is part of the post fingerprint)."""
+    out = []
+    for m in media:
+        m = {k: v for k, v in m.items() if k not in ("mime", "bytes", "sha256")}
+        if m.get("file"):
+            info, _ = load_media_file(settings, m["file"])
+            m.update(info)
+        else:
+            m.pop("file", None)
+        out.append(m)
+    return out
+
+
+def load_attachments(settings, item: dict[str, Any]) -> list[tuple[dict[str, Any], bytes]]:
+    """Image files to upload with this item, re-read at publish time and checked against the approved hash."""
+    out = []
+    for m in item.get("media") or []:
+        if not m.get("file"):
+            continue
+        try:
+            info, data = load_media_file(settings, m["file"])
+        except MediaFileError as exc:
+            raise AdapterError(f"Image not uploaded: {exc}") from None
+        if info["sha256"] != m.get("sha256"):
+            raise AdapterError(f"{m['file']} changed after the post was checked; edit the post to re-attach it")
+        out.append((m, data))
+    return out
 
 
 def find_urls(text: str) -> list[tuple[int, int]]:
@@ -185,10 +282,28 @@ def check_post(platform: str, text: str, *, thread: list[str] | None = None, med
             add("warn", "insecure_link", f"Link is not HTTPS: {url}")
         if any(f"//{s}/" in url or url.endswith(f"//{s}") for s in SHORTENERS):
             add("warn", "shortened_link", f"Shortened link hides the destination: {url}")
-    for m in media or []:
-        if not (m.get("alt_text") or "").strip():
-            add("warn", "alt_text", "A media item has no alt text (screen-reader users can't see it).")
-            break
+    missing_alt = [m for m in media or [] if not (m.get("alt_text") or "").strip()]
+    for m in missing_alt:
+        if m.get("file"):
+            add("fail", "alt_text", f"{m['file']} has no alt text; add it before the image can be uploaded.")
+    if any(not m.get("file") for m in missing_alt):
+        add("warn", "alt_text", "A media item has no alt text (screen-reader users can't see it).")
+    files = [m for m in media or [] if m.get("file")]
+    if files:
+        limits = MEDIA_LIMITS.get(platform)
+        if limits is None:
+            add("warn", "media_not_uploaded", f"Image files are uploaded only to Bluesky and Mastodon; on "
+                                              f"{spec['name']} the post is a simulation.")
+        else:
+            if len(files) > limits["max_files"]:
+                add("fail", "too_many_images", f"{spec['name']} allows {limits['max_files']} images per post.")
+            for m in files:
+                if (m.get("bytes") or 0) > limits["max_bytes"]:
+                    add("fail", "image_too_large",
+                        f"{m['file']} is {m['bytes'] / 1_000_000:.2f} MB; {spec['name']} allows "
+                        f"{limits['max_bytes'] / 1_000_000:g} MB per image.")
+                if not m.get("sha256"):
+                    add("fail", "image_unchecked", f"{m['file']} was not checked; edit the post to re-attach it.")
     letters = [c for c in full if c.isalpha()]
     if len(letters) > 20 and sum(c.isupper() for c in letters) / len(letters) > 0.6:
         add("warn", "all_caps", "Mostly capital letters reads as shouting.")
@@ -334,6 +449,7 @@ class BlueskyAdapter:
         return {"root": root, "parent": parent}
 
     async def publish(self, item: dict[str, Any], on_part: OnPart) -> dict[str, Any]:
+        attachments = load_attachments(self.settings, item)
         async with self._client() as client:
             sess = await self._auth(client)
             headers = {"Authorization": f"Bearer {sess['accessJwt']}"}
@@ -366,6 +482,10 @@ class BlueskyAdapter:
                     record["facets"] = facets
                 if reply:
                     record["reply"] = reply
+                if n == 0 and attachments:  # images go on the first post of a thread
+                    images = [{"alt": m.get("alt_text", ""), "image": await self._upload(client, headers, m, data)}
+                              for m, data in attachments]
+                    record["embed"] = {"$type": "app.bsky.embed.images", "images": images}
                 r = await client.post(f"{self.base}/xrpc/com.atproto.repo.createRecord", headers=headers,
                                       json={"repo": sess["did"], "collection": "app.bsky.feed.post", "rkey": rkey,
                                             "record": record})
@@ -378,6 +498,13 @@ class BlueskyAdapter:
                          "parent": {"uri": ref["uri"], "cid": ref["cid"]}}
             assert first is not None
             return self._ref(first, sess)
+
+    async def _upload(self, client, headers, media: dict[str, Any], data: bytes) -> dict[str, Any]:
+        r = await client.post(f"{self.base}/xrpc/com.atproto.repo.uploadBlob", content=data,
+                              headers={**headers, "Content-Type": media["mime"]})
+        if r.status_code != 200 or "blob" not in r.json():
+            raise AdapterError(f"Bluesky rejected the image {media['file']} ({r.status_code}): {r.text[:200]}")
+        return r.json()["blob"]
 
     def _ref(self, first: dict[str, Any], sess: dict[str, Any]) -> dict[str, Any]:
         rkey = first["uri"].rsplit("/", 1)[-1]
@@ -437,13 +564,17 @@ class MastodonAdapter:
                                  headers={"Authorization": f"Bearer {self.settings.mastodon_access_token}"})
 
     async def publish(self, item: dict[str, Any], on_part: OnPart) -> dict[str, Any]:
+        attachments = load_attachments(self.settings, item)
         async with self._client() as client:
+            media_ids = [await self._upload(client, m, data) for m, data in attachments]
             reply_to = item.get("reply_to")
             first: dict[str, Any] | None = None
             for n, part in enumerate([item["text"], *(item.get("thread") or [])]):
                 body: dict[str, Any] = {"status": part, "visibility": "public"}
                 if reply_to:
                     body["in_reply_to_id"] = reply_to
+                if n == 0 and media_ids:  # images go on the first post of a thread
+                    body["media_ids[]"] = media_ids
                 r = await client.post("/api/v1/statuses", data=body,
                                       headers={"Idempotency-Key": f"{item['id']}-{_short_hash(part)}-{n}"})
                 if r.status_code not in (200, 201):
@@ -454,6 +585,24 @@ class MastodonAdapter:
                 reply_to = status["id"]
             assert first is not None
             return {"external_id": first["id"], "url": first.get("url")}
+
+    async def _upload(self, client, media: dict[str, Any], data: bytes) -> str:
+        name = media["file"].replace("\\", "/").rsplit("/", 1)[-1]
+        r = await client.post("/api/v2/media", files={"file": (name, data, media["mime"])},
+                              data={"description": media.get("alt_text", "")})
+        if r.status_code not in (200, 202):
+            raise AdapterError(f"Mastodon rejected the image {media['file']} ({r.status_code}): {r.text[:200]}")
+        attachment = r.json()
+        polls = 0
+        while not attachment.get("url"):  # 202 = still processing; a status can only use it once it has a URL
+            if polls >= 10:
+                raise AdapterError(f"Mastodon is still processing the image {media['file']}; try again in a minute")
+            polls += 1
+            await asyncio.sleep(MASTODON_MEDIA_POLL_S)
+            r = await client.get(f"/api/v1/media/{attachment['id']}")
+            if r.status_code == 200:
+                attachment = r.json()
+        return str(attachment["id"])
 
     async def inbox(self, limit: int) -> list[dict[str, Any]]:
         async with self._client() as client:
@@ -674,6 +823,9 @@ def summarize(item: dict[str, Any]) -> dict[str, Any]:
 class MediaBrief(BaseModel):
     description: str = Field(..., min_length=3, max_length=2000, description="What the image/video shows (a brief)")
     alt_text: str = Field("", max_length=1500, description="Accessible description for screen readers")
+    file: str | None = Field(None, max_length=500,
+                             description="Optional image (PNG/JPEG/GIF/WebP) in the brand/sandbox folder to upload "
+                                         "with the post on Bluesky or Mastodon, e.g. brand/launch.png. Needs alt_text.")
 
 
 class AccountsInput(BaseModel):
@@ -720,7 +872,10 @@ class SocialDraft(Tool):
 
     async def run(self, args: DraftInput, ctx) -> ToolResult:
         payload = args.model_dump()
-        payload["media"] = [m.model_dump() for m in args.media]
+        try:
+            payload["media"] = describe_media(ctx.settings, [m.model_dump() for m in args.media])
+        except MediaFileError as exc:
+            return ToolResult(False, f"Image not attached: {exc}", error="bad_media")
         check = _run_check(ctx.settings, payload)
         with ctx.kernel.db.session() as s:
             row = ContentItem(platform=args.platform, kind=args.kind, text=args.text, thread=args.thread,
@@ -764,7 +919,10 @@ class SocialEdit(Tool):
         if args.thread is not None:
             changes["thread"] = args.thread
         if args.media is not None:
-            changes["media"] = [m.model_dump() for m in args.media]
+            try:
+                changes["media"] = describe_media(ctx.settings, [m.model_dump() for m in args.media])
+            except MediaFileError as exc:
+                return ToolResult(False, f"Image not attached: {exc}", error="bad_media")
         if args.sponsored is not None:
             changes["sponsored"] = args.sponsored
         merged = {**item, **changes}

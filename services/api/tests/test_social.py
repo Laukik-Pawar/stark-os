@@ -555,3 +555,152 @@ def test_bluesky_text_handling_matches_the_platform():
     assert grapheme_len(family) == 1 and grapheme_len("\U0001F1FA\U0001F1F8") == 1 and grapheme_len("é") == 1
     assert grapheme_len("\U0001F44D\U0001F3FD") == 1
     assert social.check_post("bluesky", family * 80)["verdict"] != "fail"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("hello", 5),
+    ("\U0001F469\u200d\U0001F4BB", 1),                          # woman technologist (ZWJ sequence)
+    ("\U0001F468\u200d\U0001F469\u200d\U0001F467\u200d\U0001F466", 1),  # family of four
+    ("\U0001F1F5\U0001F1F0\U0001F1FA\U0001F1F8", 2),              # two flags side by side
+    ("\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F", 1),  # England flag (tag sequence)
+    ("1\ufe0f\u20e3", 1),                                         # keycap one
+    ("e\u0301\u0302", 1),                                         # e with two combining accents
+    ("\u1100\u1161\u11a8", 1),                                   # Hangul syllable written as jamo
+    ("\u0928\u092e\u0938\u094d\u0924\u0947", 3),                     # Hindi "namaste": 3 clusters
+    ("\r\n", 1),
+])
+def test_grapheme_len_counts_user_perceived_characters(text, expected):
+    assert social.grapheme_len(text) == expected
+
+
+def test_bluesky_limit_uses_graphemes_not_code_points():
+    flag = "\U0001F1F5\U0001F1F0"  # 2 code points, 1 grapheme, 8 bytes (stays under the 3000-byte cap)
+    assert social.weighted_length("bluesky", flag * 300) == 300
+    assert social.check_post("bluesky", flag * 300)["verdict"] != "fail"
+    too_long = social.check_post("bluesky", flag * 301)
+    assert any(i["code"] == "too_long" and "301 characters" in i["message"] for i in too_long["issues"])
+
+
+def test_grapheme_fallback_still_handles_common_emoji():
+    assert social._approx_grapheme_len("\U0001F468\u200d\U0001F469\u200d\U0001F467") == 1
+    assert social._approx_grapheme_len("\U0001F1FA\U0001F1F8") == 1
+
+
+# ------------------------------------------------------------------ real image upload (#11)
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+def _image(settings, name="brand/launch.png", data=PNG):
+    path = settings.workspace_roots[0] / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return name
+
+
+async def test_bluesky_uploads_images_with_alt_text(settings):
+    settings.bluesky_handle, settings.bluesky_app_password = "brand.bsky.social", "app-pass-1234"
+    name = _image(settings)
+    seen: dict = {}
+    inner = _bsky_transport(seen).handler
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("uploadBlob"):
+            assert req.headers["authorization"] == "Bearer jwt-1" and req.headers["content-type"] == "image/png"
+            seen.setdefault("blobs", []).append(req.content)
+            return httpx.Response(200, json={"blob": {"$type": "blob", "ref": {"$link": "bafyimg"},
+                                                      "mimeType": "image/png", "size": len(req.content)}})
+        return inner(req)
+
+    k, _ = make_kernel(settings)
+    item = await _draft(k, thread=["Part two"], media=[{"description": "Launch banner", "alt_text": "STARK OS logo on blue",
+                                                       "file": name}])
+    assert item["media"][0]["sha256"] and item["media"][0]["mime"] == "image/png"
+    sc = Social(settings, httpx.MockTransport(handler))
+    res = await social.SocialPublish(sc).run(social.SocialPublish.Input(item_id=item["id"]), _ctx(k, "dum_e"))
+    assert res.ok and not res.simulated, res.summary
+    assert seen["blobs"] == [PNG]
+    first, second = seen["records"]
+    assert first["embed"] == {"$type": "app.bsky.embed.images",
+                              "images": [{"alt": "STARK OS logo on blue",
+                                          "image": {"$type": "blob", "ref": {"$link": "bafyimg"},
+                                                    "mimeType": "image/png", "size": len(PNG)}}]}
+    assert "embed" not in second  # images only on the first post of a thread
+
+
+async def test_mastodon_uploads_images_and_waits_for_processing(settings, monkeypatch):
+    monkeypatch.setattr(social, "MASTODON_MEDIA_POLL_S", 0)
+    settings.mastodon_base_url, settings.mastodon_access_token = "https://social.example", "masto-token-123"
+    name = _image(settings, "brand/photo.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 32)
+    seen: dict = {"polls": 0}
+
+    def handler(req: httpx.Request):
+        assert req.headers["authorization"] == "Bearer masto-token-123"
+        if req.method == "POST" and req.url.path == "/api/v2/media":
+            body = req.content
+            assert b'name="description"' in body and b"Team photo at the launch" in body
+            assert b'filename="photo.jpg"' in body and b"image/jpeg" in body
+            return httpx.Response(202, json={"id": "m1", "url": None})
+        if req.method == "GET" and req.url.path == "/api/v1/media/m1":
+            seen["polls"] += 1
+            return httpx.Response(200, json={"id": "m1", "url": "https://files.example/m1.jpg"})
+        if req.method == "POST" and req.url.path == "/api/v1/statuses":
+            seen.setdefault("posts", []).append(httpx.QueryParams(req.content.decode()))
+            n = len(seen["posts"])
+            return httpx.Response(200, json={"id": str(300 + n), "url": f"https://social.example/@b/{300 + n}"})
+        return httpx.Response(404)
+
+    k, _ = make_kernel(settings)
+    item = await _draft(k, platform="mastodon", thread=["more"],
+                        media=[{"description": "Team photo", "alt_text": "Team photo at the launch", "file": name}])
+    res = await social.SocialPublish(Social(settings, httpx.MockTransport(handler))).run(
+        social.SocialPublish.Input(item_id=item["id"]), _ctx(k, "dum_e"))
+    assert res.ok, res.summary
+    assert seen["polls"] == 1
+    first, second = seen["posts"]
+    assert first.get_list("media_ids[]") == ["m1"] and "media_ids[]" not in second
+
+
+async def test_image_files_are_validated(settings, tmp_path):
+    k, _ = make_kernel(settings)
+    draft = k.tools.get("social.draft")
+
+    async def attempt(**media):
+        args = {"platform": "bluesky", "text": "Picture time", "media": [{"description": "pic", **media}]}
+        return await draft.run(draft.Input(**args), _ctx(k, "edith"))
+
+    outside = tmp_path / "elsewhere.png"
+    outside.write_bytes(PNG)
+    res = await attempt(alt_text="x", file=str(outside))
+    assert not res.ok and res.error == "bad_media" and "outside the authorised workspace" in res.summary
+    res = await attempt(alt_text="x", file=_image(settings, "brand/fake.png", b"not an image"))
+    assert not res.ok and "not a valid PNG image" in res.summary
+    res = await attempt(alt_text="x", file=_image(settings, "brand/notes.txt", b"hello"))
+    assert not res.ok and "only PNG, JPEG, GIF and WebP" in res.summary
+    res = await attempt(alt_text="x", file="brand/missing.png")
+    assert not res.ok and "was not found" in res.summary
+
+    no_alt = await attempt(file=_image(settings))
+    assert no_alt.ok and any(i["code"] == "alt_text" and i["level"] == "fail" for i in no_alt.data["check"]["issues"])
+    big = await attempt(alt_text="Big banner", file=_image(settings, "brand/big.png", PNG + b"\x00" * 1_000_001))
+    assert any(i["code"] == "image_too_large" for i in big.data["check"]["issues"])
+    sim = await draft.run(draft.Input(platform="x", text="hi", media=[{"description": "pic", "alt_text": "a",
+                                                                         "file": _image(settings)}]), _ctx(k, "edith"))
+    assert any(i["code"] == "media_not_uploaded" for i in sim.data["check"]["issues"])
+
+
+async def test_image_changed_after_approval_is_not_uploaded(settings):
+    settings.mastodon_base_url, settings.mastodon_access_token = "https://social.example", "masto-token-123"
+    name = _image(settings)
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(req.url.path)
+        return httpx.Response(500)
+
+    k, _ = make_kernel(settings)
+    item = await _draft(k, platform="mastodon", media=[{"description": "pic", "alt_text": "A logo", "file": name}])
+    _image(settings, data=PNG + b"edited")  # someone swaps the file after the post was checked
+    res = await social.SocialPublish(Social(settings, httpx.MockTransport(handler))).run(
+        social.SocialPublish.Input(item_id=item["id"]), _ctx(k, "dum_e"))
+    assert not res.ok and "changed after the post was checked" in res.summary
+    assert calls == []  # nothing was sent

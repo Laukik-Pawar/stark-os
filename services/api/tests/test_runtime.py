@@ -282,6 +282,65 @@ async def test_team_review_tolerates_a_failing_agent(settings):
     assert "failed: edith" in done["result"]
 
 
+async def test_team_review_refuses_when_free_requests_are_low(settings):
+    def brain(agent, req):
+        if agent == "jarvis":
+            if n_tool_rounds(req) == 0:
+                return [tool("team.review", {"subject": "Review the launch plan."})]
+            return [text(last_tool_results(req)[0]["content"])]
+        return [text(f"{agent} reviewed")]
+
+    k, prov = make_kernel(settings, brain)
+
+    async def few_left():
+        return 3
+
+    k.free_requests_left = few_left
+    done = await k.wait(k.submit_chat("jarvis", "team review please")["id"], 20)
+    assert done["status"] == "completed"
+    # 5 reviewers + Ultron + the summary = 7 requests needed, only 3 left: nobody was asked to review
+    assert "needs about 7 free model requests; you have 3 left today" in done["result"]
+    assert {a for a, _ in prov.requests} == {"jarvis"}
+
+
+async def test_team_review_runs_when_quota_is_enough_or_unknown(settings):
+    def brain(agent, req):
+        if agent == "jarvis":
+            if n_tool_rounds(req) == 0:
+                return [tool("team.review", {"subject": "Review the launch plan.", "reviewers": ["friday"]})]
+            return [text(last_tool_results(req)[0]["content"])]
+        return [text(f"{agent} reviewed")]
+
+    for left in (3, None):  # friday + ultron + summary = 3 needed
+        k, prov = make_kernel(settings, brain)
+
+        async def quota(value=left):
+            return value
+
+        k.free_requests_left = quota
+        done = await k.wait(k.submit_chat("jarvis", "review")["id"], 20)
+        assert done["status"] == "completed" and "1/1 reviews completed" in done["result"], done
+        assert "friday" in {a for a, _ in prov.requests}
+
+
+async def test_free_requests_left_reads_the_openrouter_key(settings):
+    k, _ = make_kernel(settings, lambda agent, req: [text("hi")])
+
+    class Pool:
+        calls = 0
+
+        def configured(self):
+            return True, ""
+
+        async def key_info(self):
+            Pool.calls += 1
+            return {"free_model_daily_requests": {"limit": 50, "remaining": 12}}
+
+    k.router = type("R", (), {"openrouter": Pool()})()
+    assert await k.free_requests_left() == 12
+    assert await k.free_requests_left() == 12 and Pool.calls == 1  # cached
+
+
 async def test_retry_on_transient_provider_errors(settings):
     attempts = {"n": 0}
 

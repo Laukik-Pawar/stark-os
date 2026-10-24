@@ -33,6 +33,29 @@ jobs:
       - run: cd apps/web && npx tsc --noEmit && npm test && npm run build
       - run: cd apps/web && npx playwright test
         env: { STARK_PYTHON: python }
+  windows-setup:
+    # scripts/setup.ps1 and scripts/dev.ps1 (issue #8): install from scratch, start both servers, check health
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "22" }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.12" }
+      - name: scripts\setup.ps1
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+      - name: scripts\dev.ps1 starts the API and dashboard
+        shell: pwsh
+        env: { STARK_DEV_EXIT_WHEN_READY: "1", STARK_WEB_PORT: "3737", STARK_PORT: "8737" }
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: API tests on Windows (social and runtime)
+        shell: pwsh
+        run: |
+          cd services/api
+          .venv\Scripts\python.exe -m pytest -q tests/test_social.py tests/test_runtime.py
   secret-scan:
     runs-on: ubuntu-latest
     steps:

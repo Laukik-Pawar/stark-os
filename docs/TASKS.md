@@ -22,21 +22,24 @@
 - [x] Content view in the dashboard; E2E for draft → approval → publish
 - [x] Removed smart-home and terminal tools
 
+## Done (unreleased)
+- [x] Bluesky length counted in grapheme clusters (#6)
+- [x] Team review checks the free request quota first (#9)
+- [x] Real image upload to Bluesky and Mastodon from the brand folder (#11)
+- [x] Windows setup and dev scripts (PowerShell), tested in CI (#8)
+
 ## Next (priority order)
 1. **Live posting test** — connect a Bluesky test account and a Mastodon test account; tune prompts from real transcripts on free models.
-2. **Media upload** — attach a real image/video file from the brand folder to Bluesky/Mastodon posts (alt text already enforced).
-3. **Scheduled mode** — publish due items unattended only inside a user-defined window, with a per-campaign standing approval and a daily cap.
-4. **More real adapters** — Threads, LinkedIn and others once the owner has API access.
-5. **Token streaming** — stream deltas through SSE into the chat bubble.
-6. **Request budgeting** — warn before a team review when fewer free requests remain than it typically needs.
-7. **Vector memory** — free embedding model + pgvector, lexical fallback.
-8. **MCP** — expose STARK tools as an MCP server.
-9. **Packaging** — verified Docker images.
+2. **Scheduled mode** — publish due items unattended only inside a user-defined window, with a per-campaign standing approval and a daily cap.
+3. **More real adapters** — Threads, LinkedIn and others once the owner has API access.
+4. **Token streaming** — stream deltas through SSE into the chat bubble.
+5. **Vector memory** — free embedding model + pgvector, lexical fallback.
+6. **MCP** — expose STARK tools as an MCP server.
+7. **Packaging** — verified Docker images.
 
 ## Known limitations
 - Tasks don't survive an API restart (marked failed on boot).
 - SSE token travels in the query string.
 - The headless browser resolves DNS itself; rebinding during a single page load is only mitigated by per-request re-checks.
 - Free models are rate-limited (50 requests/day on a free key) and change often.
-- Bluesky character limits are counted in code points (Bluesky counts graphemes); emoji-heavy posts may be slightly under the real limit.
 - Bluesky/Mastodon publishing is verified against recorded API shapes, not yet against a live account from this build environment.

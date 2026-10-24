@@ -88,10 +88,30 @@ class Kernel:
         self._cancel_requested: set[str] = set()
         # per task-tree facts used by the exfiltration guard (see tools/web.py outbound_needs_approval)
         self._tree_flags: dict[str, dict[str, Any]] = {}
+        self._quota_cache: tuple[float, int | None] = (0.0, None)
         self.agent_status: dict[str, dict[str, Any]] = {
             a.id: {"status": "idle", "task_id": None, "detail": "", "updated_at": utcnow().isoformat()}
             for a in registry.all()
         }
+
+    # ------------------------------------------------------------------ quota
+    async def free_requests_left(self) -> int | None:
+        """Free-model requests left today on the OpenRouter key (the Models panel figure), cached for 60 s.
+        None when unknown: no OpenRouter key, offline, or a paid key without a daily free limit."""
+        at, value = self._quota_cache
+        if at > time.time() - 60:
+            return value
+        pool = getattr(self.router, "openrouter", None)
+        value = None
+        if pool is not None and pool.configured()[0]:
+            try:
+                quota = (await pool.key_info()).get("free_model_daily_requests")
+                if isinstance(quota, dict) and isinstance(quota.get("remaining"), int):
+                    value = quota["remaining"]
+            except Exception as exc:
+                log.warning(f"free request quota unavailable: {exc}")
+        self._quota_cache = (time.time(), value)
+        return value
 
     # ------------------------------------------------------------------ state
     def _set_agent(self, agent_id: str, status: str, task_id: str | None, detail: str = "") -> None:
@@ -657,6 +677,13 @@ class Kernel:
         chosen = [a for a in (reviewers or candidates) if a in candidates]
         if not chosen:
             raise DelegationError("no eligible reviewers")
+        # Each reviewer answers at least once, Ultron challenges once, and the requester writes the summary.
+        needed = len(chosen) + (1 if "ultron" in sender.delegation.can_delegate_to else 0) + 1
+        left = await self.free_requests_left()
+        if left is not None and left < needed:
+            raise DelegationError(
+                f"This review needs about {needed} free model requests; you have {left} left today "
+                "(the free quota resets at 00:00 UTC). Ask fewer reviewers or try again after the reset.")
 
         async def one(agent_id: str) -> dict[str, Any]:
             focus = self.registry.get(agent_id).delegation.review_focus
