@@ -102,7 +102,7 @@ def in_scope(key: str, scope: str) -> bool:
 def rel(path: Path, roots: list[Path]) -> str:
     for root in roots:
         if path == root or root in path.parents:
-            return str(path.relative_to(root)) or "."
+            return path.relative_to(root).as_posix()  # forward slashes on every OS ("." for the root)
     return str(path)
 
 
