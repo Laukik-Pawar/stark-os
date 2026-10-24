@@ -993,16 +993,26 @@ class Autopilot:
         return data
 
     # ------------------------------------------------------------ approvals and vetoes
-    def approve(self, item_id: str, fp: str) -> dict[str, Any]:
+    def approval_problem(self, item_id: str, fp: str) -> str | None:
+        """Why this post cannot be approved right now, as a message for the person, or None if it can."""
         item = social_tools._item(self.kernel, item_id)
         if item is None:
-            raise KeyError("no such content item")
+            return "no such content item"
         if social_tools.fingerprint(item) != fp:
-            raise AutopilotError("This post changed since you looked at it. Refresh and check it again.")
+            return "This post changed since you looked at it. Refresh and check it again."
         if item["status"] not in ("draft", "scheduled", "failed"):
-            raise AutopilotError(f"This post is {item['status']}.")
+            return f"This post is {item['status']}."
         if social_tools._run_check(self.settings, item)["verdict"] == "fail":
-            raise AutopilotError("The policy check fails for this post; edit it first.")
+            return "The policy check fails for this post; edit it first."
+        return None
+
+    def approve(self, item_id: str, fp: str) -> dict[str, Any]:
+        problem = self.approval_problem(item_id, fp)
+        if problem == "no such content item":
+            raise KeyError(problem)
+        if problem:
+            raise AutopilotError(problem)
+        item = social_tools._item(self.kernel, item_id)
         when = _dt(item.get("scheduled_for"))
         now = utcnow()
         if when is None or when <= now + timedelta(minutes=2):

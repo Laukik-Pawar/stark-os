@@ -614,14 +614,19 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
             raise HTTPException(409, "Emergency stop is engaged.")
         results = []
         for it in body.items:
+            # The reason comes from a check that returns plain messages, so no exception text reaches the response.
+            problem = _ap(k).approval_problem(it.id, it.fingerprint)
+            if problem:
+                results.append({"id": it.id, "ok": False, "error": problem})
+                continue
             try:
                 data = _ap(k).approve(it.id, it.fingerprint)
-                results.append({"id": it.id, "ok": True, "scheduled_for": data["scheduled_for"]})
-                k.obs.audit("user", "autopilot.approve", "ok", target=it.id)
-            except ap.AutopilotError as exc:
-                results.append({"id": it.id, "ok": False, "error": str(exc)})
-            except KeyError:
-                results.append({"id": it.id, "ok": False, "error": "no such content item"})
+            except (ap.AutopilotError, KeyError):
+                log.warning("autopilot approve failed after checks", exc_info=True)
+                results.append({"id": it.id, "ok": False, "error": "This post could not be approved. Refresh and check it again."})
+                continue
+            results.append({"id": it.id, "ok": True, "scheduled_for": data["scheduled_for"]})
+            k.obs.audit("user", "autopilot.approve", "ok", target=it.id)
         return {"results": results, "approved": sum(r["ok"] for r in results)}
 
     @app.post("/api/autopilot/items/{item_id}/veto", dependencies=[api])
