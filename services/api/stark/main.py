@@ -618,8 +618,10 @@ def create_app(settings: Settings | None = None, providers: dict[str, ModelProvi
                 data = _ap(k).approve(it.id, it.fingerprint)
                 results.append({"id": it.id, "ok": True, "scheduled_for": data["scheduled_for"]})
                 k.obs.audit("user", "autopilot.approve", "ok", target=it.id)
-            except (ap.AutopilotError, KeyError) as exc:
-                results.append({"id": it.id, "ok": False, "error": str(exc).strip("'\"")})
+            except ap.AutopilotError as exc:
+                results.append({"id": it.id, "ok": False, "error": str(exc)})
+            except KeyError:
+                results.append({"id": it.id, "ok": False, "error": "no such content item"})
         return {"results": results, "approved": sum(r["ok"] for r in results)}
 
     @app.post("/api/autopilot/items/{item_id}/veto", dependencies=[api])

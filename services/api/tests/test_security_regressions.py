@@ -353,3 +353,14 @@ def test_more_credential_files_are_sensitive(tmp_path):
 def test_move_batches_are_fully_visible(settings):
     with pytest.raises(Exception):
         FsMove.Input(moves=[{"src": f"a{i}", "dst": f"b{i}"} for i in range(51)])
+
+
+def test_reddit_link_check_uses_the_parsed_host():
+    """CodeQL py/incomplete-url-substring-sanitization: match the host, not a substring of the URL."""
+    from stark.autopilot import _is_reddit_host
+
+    assert _is_reddit_host("https://www.reddit.com/r/python/comments/x")
+    assert _is_reddit_host("https://i.redd.it/abc.png")
+    assert not _is_reddit_host("https://example.com/?ref=reddit.com")
+    assert not _is_reddit_host("https://reddit.com.example.org/post")
+    assert not _is_reddit_host("https://notreddit.com/post")

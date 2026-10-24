@@ -38,6 +38,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -102,6 +103,15 @@ def similarity(a: str, b: str) -> float:
     if not sa or not sb:
         return 0.0
     return len(sa & sb) / len(sa | sb)
+
+
+def _is_reddit_host(url: str) -> bool:
+    """True when the URL's host is Reddit itself (reddit.com, redd.it or a subdomain), checked on the parsed host."""
+    try:
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return True
+    return any(host == d or host.endswith("." + d) for d in ("reddit.com", "redd.it"))
 
 
 def url_hash(url: str) -> str:
@@ -301,7 +311,7 @@ class Researcher:
                 continue
             url = d.get("url_overridden_by_dest") or d.get("url") or ""
             permalink = "https://www.reddit.com" + (d.get("permalink") or "")
-            if not url.startswith("http") or "reddit.com" in url or "redd.it" in url:
+            if not url.startswith("http") or _is_reddit_host(url):
                 url = permalink
             out.append({"title": (d.get("title") or "")[:300], "url": url, "summary": (d.get("selftext") or "")[:1500],
                         "published_at": _dt(d.get("created_utc")), "source": f"reddit:r/{sub}",
