@@ -20,7 +20,7 @@ from .filesystem import SKIP_DIRS, inside_roots, is_sensitive, rel, resolve_in_r
 SECRET_RULES = [
     ("OpenRouter API key", re.compile(r"sk-or-v1-[0-9a-fA-F]{32,}"), "critical"),
     ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), "critical"),
-    ("Anthropic API key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "critical"),
+    ("sk-ant API key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "critical"),
     ("OpenAI-style API key", re.compile(r"sk-(?:proj-)?[A-Za-z0-9]{20,}"), "critical"),
     ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"), "critical"),
     ("Slack token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"), "critical"),
