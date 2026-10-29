@@ -140,6 +140,14 @@ docs/                   ARCHITECTURE, DECISIONS, IMPLEMENTATION_STATUS, TASKS
 - Secrets live only in `.env` (git-ignored) and are redacted from logs. The API binds to 127.0.0.1 and requires a random token.
 - Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
+## Roadmap
+
+Planned work that contributors can pick up. Each item becomes an issue with details; comment there to take it on.
+
+- [ ] Docker Compose setup for one-command self-hosting
+- [ ] Engagement export (CSV) per post and per platform from the dashboard
+- [ ] Real publishing to Threads through its public API
+
 ## FAQ
 
 **Can it post automatically, without me?**
