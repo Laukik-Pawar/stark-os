@@ -56,6 +56,110 @@ The agents are modelled on the AI personas in Vision's Mindspace from Marvel's *
 
 New here? Read the **[user guide](docs/USER_GUIDE.md)**. Exact status: **[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)**.
 
+
+
+## Docker Compose (Self-Hosting)
+
+STARK OS supports self-hosting using Docker Compose, with a Next.js frontend and FastAPI backend.
+
+### Prerequisites
+
+- Docker Engine with Docker Compose v2, or Docker Desktop
+- Python 3.11+ for the initial setup script
+- An optional OpenRouter API key for AI functionality
+
+### First-time setup
+
+Clone the repository:
+
+```bash
+git clone https://github.com/Shahrukhalid/stark-os.git
+cd stark-os
+```
+
+Generate the local configuration and a secure API token:
+
+```bash
+python scripts/setup.py
+```
+
+The script creates `.env` from `.env.example`, generates a random API token, and initializes the demo sandbox. It preserves any existing `.env`.
+
+Add `OPENROUTER_API_KEY` to `.env` if you want to use the AI agents.
+
+### Start the application
+
+```bash
+docker compose up -d --build
+```
+
+Once the containers are healthy:
+
+- Dashboard: http://localhost:3000
+- API health endpoint: http://localhost:8000/api/health
+
+The services bind to localhost by default and are not directly exposed to the public internet.
+
+### Production-hardened deployment
+
+Use the optional production override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+The override adds read-only root filesystems, dropped Linux capabilities, restrictions on privilege escalation, temporary writable directories, process limits, and CPU/memory limits.
+
+These settings provide additional hardening but do not by themselves make the application ready for public internet exposure. Review authentication, TLS, secrets management, backups, and deployment-specific security requirements before hosting remotely.
+
+### Check service health and logs
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+For the production configuration:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+```
+
+### Data persistence
+
+SQLite is the default database. Application data is stored in the Docker named volume `stark-data`, mounted at `/app/data`.
+
+The local `./sandbox` directory is bind-mounted at `/app/sandbox`.
+
+An optional PostgreSQL service is available:
+
+```bash
+docker compose --profile postgres up -d
+```
+
+To use PostgreSQL, set `POSTGRES_PASSWORD` and configure `DATABASE_URL` to point to the PostgreSQL container. Starting the PostgreSQL profile alone does not switch the API away from SQLite.
+
+Do not use `docker compose down -v` unless you intend to delete the Compose-managed named volumes and their stored data.
+
+### Stop the application
+
+```bash
+docker compose down
+```
+
+This removes the containers and network while retaining named volumes.
+
+### Troubleshooting
+
+If startup fails:
+
+1. Run `docker compose config --quiet` to validate the configuration.
+2. Confirm `.env` exists and contains a nonempty `STARK_API_TOKEN`.
+3. Run `docker compose ps` to inspect container status.
+4. Run `docker compose logs --tail=100` to investigate errors.
+5. Check whether ports 3000 and 8000 are already in use.
+
+
 ## Quick start (macOS / Linux / Windows)
 
 Requirements: Python 3.11+, Node.js 20+, and a free [OpenRouter key](https://openrouter.ai/keys).
