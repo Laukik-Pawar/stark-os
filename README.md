@@ -91,8 +91,9 @@ You can still run `python scripts/setup.py` to configure the application manuall
 ### Prerequisites
 
 - Docker Engine with Docker Compose v2, or Docker Desktop
-- Python 3.11+ for the initial setup script
+- Python 3.11+ only if using the optional manual setup script
 - An optional OpenRouter API key for AI functionality
+
 
 ### First-time setup
 
@@ -103,15 +104,28 @@ git clone https://github.com/Shahrukhalid/stark-os.git
 cd stark-os
 ```
 
-Generate the local configuration and a secure API token:
+No `.env` file or manual setup script is required to start Docker Compose.
+
+On first startup, the API automatically generates a secure token if
+`STARK_API_TOKEN` is not configured. The generated token is stored in
+the persistent Docker volume and reused across restarts.
+
+To retrieve an automatically generated token after startup:
+
+```bash
+docker compose exec api cat /app/data/api-token
+```
+
+If you prefer manual configuration, you can optionally run:
 
 ```bash
 python scripts/setup.py
 ```
 
-The script creates `.env` from `.env.example`, generates a random API token, and initializes the demo sandbox. It preserves any existing `.env`.
+This creates `.env` with a generated token if it does not already exist.
 
-Add `OPENROUTER_API_KEY` to `.env` if you want to use the AI agents.
+To enable AI functionality, configure `OPENROUTER_API_KEY` in `.env`.
+
 
 ### Start the application
 
@@ -180,7 +194,7 @@ This removes the containers and network while retaining named volumes.
 If startup fails:
 
 1. Run `docker compose config --quiet` to validate the configuration.
-2. Confirm `.env` exists and contains a nonempty `STARK_API_TOKEN`.
+2. If using `.env`, verify that `STARK_API_TOKEN` is valid. Otherwise, check the API logs for automatic token initialization errors.
 3. Run `docker compose ps` to inspect container status.
 4. Run `docker compose logs --tail=100` to investigate errors.
 5. Check whether ports 3000 and 8000 are already in use.
