@@ -9,9 +9,10 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
       args: { STARK_UID: "${UID:-1000}" }
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
-      STARK_API_TOKEN: ${STARK_API_TOKEN:?run python3 scripts/setup.py first to create .env}
       STARK_WEB_ORIGIN: http://localhost:3000
       STARK_WORKSPACE_ROOTS: /app/sandbox
     volumes:

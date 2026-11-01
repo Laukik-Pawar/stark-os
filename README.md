@@ -62,6 +62,32 @@ New here? Read the **[user guide](docs/USER_GUIDE.md)**. Exact status: **[docs/I
 
 STARK OS supports self-hosting using Docker Compose, with a Next.js frontend and FastAPI backend.
 
+
+### Automatic API token setup
+
+Docker Compose automatically generates a secure API token on first startup if `STARK_API_TOKEN` is not configured.
+
+Start the application:
+
+```bash
+docker compose up -d --build
+```
+
+If a token was generated automatically, retrieve it using:
+
+```bash
+docker compose exec api cat /app/data/api-token
+```
+
+Paste the token into the dashboard's Connect screen.
+
+The token is stored in the persistent `stark-data` Docker volume and reused across container restarts.
+
+If you already have a `STARK_API_TOKEN` in `.env`, that token takes precedence.
+
+You can still run `python scripts/setup.py` to configure the application manually.
+
+
 ### Prerequisites
 
 - Docker Engine with Docker Compose v2, or Docker Desktop
